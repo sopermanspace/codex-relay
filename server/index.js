@@ -799,31 +799,36 @@ function isAllowedProjectPath(candidate) {
 }
 
 function runCodexExec(prompt, cwd = codexWorkdir) {
-  const args = [
-    '-a',
-    process.env.CODEX_APPROVAL_POLICY || 'never',
-    '--sandbox',
-    process.env.CODEX_SANDBOX || 'workspace-write',
-    '-C',
-    cwd,
-    'exec',
-    '--color',
-    'never',
-    '--skip-git-repo-check',
-    prompt
-  ];
+  return (async () => {
+    const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-relay-'));
+    const outputFile = path.join(outputDir, 'last-message.txt');
+    const args = [
+      'exec',
+      '--sandbox',
+      process.env.CODEX_SANDBOX || 'workspace-write',
+      '-C',
+      cwd,
+      '--color',
+      'never',
+      '--skip-git-repo-check',
+      '--output-last-message',
+      outputFile,
+      prompt
+    ];
 
-  return new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
     const child = spawn(codexCommand, args, {
       cwd,
       env: {
         ...process.env,
         TERM: 'dumb',
         NO_COLOR: '1'
-      }
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
     });
 
     let output = '';
+    let stderr = '';
     let settled = false;
     const timeout = setTimeout(() => {
       settled = true;
@@ -836,7 +841,7 @@ function runCodexExec(prompt, cwd = codexWorkdir) {
     });
 
     child.stderr.on('data', (chunk) => {
-      output += chunk.toString();
+      stderr += chunk.toString();
     });
 
     child.on('error', (error) => {
@@ -846,16 +851,25 @@ function runCodexExec(prompt, cwd = codexWorkdir) {
       reject(error);
     });
 
-    child.on('close', (exitCode) => {
+    child.on('close', async (exitCode) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      let finalOutput = output.trim();
+      try {
+        const lastMessage = await fs.readFile(outputFile, 'utf8');
+        if (lastMessage.trim()) finalOutput = lastMessage.trim();
+      } catch {
+        if (!finalOutput && stderr.trim()) finalOutput = stderr.trim();
+      }
+      fs.rm(outputDir, { recursive: true, force: true }).catch(() => {});
       resolve({
         exitCode,
-        output: output.trim()
+        output: finalOutput
       });
     });
-  });
+    });
+  })();
 }
 
 function resolveSlashCommand(prompt) {

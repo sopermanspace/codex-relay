@@ -293,10 +293,6 @@ public class MainActivity extends Activity {
         projectsButtonParams.rightMargin = dp(8);
         header.addView(projectsButton, projectsButtonParams);
 
-        Button close = quietButton("Lock");
-        close.setOnClickListener(view -> showConnect());
-        header.addView(close, new LinearLayout.LayoutParams(dp(74), dp(44)));
-
         LinearLayout chatMeta = new LinearLayout(this);
         chatMeta.setOrientation(LinearLayout.HORIZONTAL);
         chatMeta.setGravity(Gravity.CENTER_VERTICAL);
