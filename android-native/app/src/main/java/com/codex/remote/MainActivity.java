@@ -150,13 +150,13 @@ public class MainActivity extends Activity {
         TextView eyebrow = labelCaps("SECURE COMMAND CENTER");
         connectScreen.addView(eyebrow, centerWrap());
 
-        TextView title = heroTitle("Codex Remote");
+        TextView title = heroTitle("Codex Relay");
         title.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams titleParams = matchWrap();
         titleParams.topMargin = dp(8);
         connectScreen.addView(title, titleParams);
 
-        TextView subtitle = body("Run high-trust coding tasks from Android with clean native output.");
+        TextView subtitle = body("A private relay from your phone to the Codex agent on your Mac.");
         subtitle.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams subtitleParams = matchWrap();
         subtitleParams.topMargin = dp(8);
@@ -217,7 +217,7 @@ public class MainActivity extends Activity {
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);
         header.addView(titles, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        titles.addView(sectionTitle("Command Center"));
+        titles.addView(sectionTitle("Relay Dashboard"));
         metaLabel = caption("Connected");
         titles.addView(metaLabel);
 
@@ -240,7 +240,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams modeParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
         modeParams.leftMargin = dp(12);
         statusRow.addView(mode, modeParams);
-        TextView statusText = body("Tell Codex what to do. The Mac app-server runs the task and returns a readable result.");
+        TextView statusText = body("Send a task through the relay. Your Mac runs Codex and returns a readable result.");
         LinearLayout.LayoutParams statusTextParams = matchWrap();
         statusTextParams.topMargin = dp(12);
         statusCard.addView(statusText, statusTextParams);
@@ -256,7 +256,7 @@ public class MainActivity extends Activity {
         promptInput.setGravity(Gravity.TOP | Gravity.START);
         workspaceScreen.addView(promptInput, tallFieldParams());
 
-        runButton = primaryButton("Run Codex");
+        runButton = primaryButton("Run via Relay");
         runButton.setOnClickListener(view -> runCommand());
         LinearLayout.LayoutParams runParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58));
         runParams.topMargin = dp(14);
@@ -404,7 +404,7 @@ public class MainActivity extends Activity {
     private void setBusy(boolean busy) {
         progressBar.setVisibility(busy ? View.VISIBLE : View.GONE);
         runButton.setEnabled(!busy);
-        runButton.setText(busy ? "Running..." : "Run Codex");
+        runButton.setText(busy ? "Running..." : "Run via Relay");
         statusPill.setText(busy ? "Running" : "Online");
     }
 

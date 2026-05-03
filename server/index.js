@@ -51,7 +51,7 @@ app.get('/health', (req, res) => {
 
 app.get('/api/config', (req, res) => {
   res.json({
-    appName: 'Codex Remote',
+    appName: 'Codex Relay',
     workdir: codexWorkdir,
     tokenRequired: true
   });
@@ -66,7 +66,7 @@ app.get('/api/auth', (req, res) => {
 
   res.json({
     ok: true,
-    appName: 'Codex Remote',
+    appName: 'Codex Relay',
     workdir: codexWorkdir
   });
 });
@@ -213,7 +213,7 @@ server.listen(port, host, () => {
   const networkUrl = getNetworkUrl(port);
   const publicUrl = process.env.PUBLIC_URL;
 
-  console.log(`Codex Remote server listening on ${localUrl}`);
+  console.log(`Codex Relay server listening on ${localUrl}`);
   console.log(`Workdir: ${codexWorkdir}`);
   console.log(`Remote token: ${remoteToken}`);
 

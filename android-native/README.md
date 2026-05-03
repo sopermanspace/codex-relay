@@ -1,6 +1,6 @@
-# Codex Remote Android App
+# Codex Relay Android App
 
-Native Android client for the Codex app-server. This is not a browser install flow and not a WebView shell: it builds as an Android app with its own launcher icon, generated character artwork, native connect screen, native command workspace, and clean Codex result rendering.
+Native Android client for the Codex app-server. This is not a browser install flow and not a WebView shell: it builds as **Codex Relay**, an Android app with its own launcher icon, generated character artwork, native connect screen, Relay Dashboard, and clean Codex result rendering.
 
 ## What It Does
 

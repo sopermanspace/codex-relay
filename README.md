@@ -1,4 +1,4 @@
-# Codex Android Remote
+# Codex Relay
 
 A native Android app plus a local app-server that lets you control Codex from your phone.
 
@@ -20,7 +20,7 @@ The native app project lives in:
 android-native/
 ```
 
-It is a real Android app with its own launcher icon, generated character artwork, native connect screen, native command workspace, and clean Codex result rendering. It does not use WebView.
+It is a real Android app named **Codex Relay** with its own launcher icon, generated character artwork, native connect screen, Relay Dashboard, and clean Codex result rendering. It does not use WebView.
 
 Build after installing Android Studio or a working JDK/Gradle setup:
 

@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">Codex Remote</string>
+    <string name="app_name">Codex Relay</string>
     <string name="default_server_url">http://192.168.18.182:8787</string>
 </resources>
