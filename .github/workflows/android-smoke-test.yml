@@ -9,6 +9,7 @@ on:
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/android-smoke-test.yml"
+      - ".github/scripts/android_smoke_connect.py"
 
 jobs:
   smoke-test:
@@ -17,7 +18,7 @@ jobs:
     timeout-minutes: 15
 
     env:
-      REMOTE_TOKEN: SmokeTokenSmokeTokenSmokeToken123456
+      REMOTE_TOKEN: smoketokensmoketokensmoketoken123456
       PORT: 8787
       HOST: 0.0.0.0
       CODEX_COMMAND: node
@@ -57,6 +58,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.10.2"
+
+      - name: Use emulator loopback URL
+        run: |
+          perl -0pi -e 's#<string name="default_server_url">.*?</string>#<string name="default_server_url">http://10.0.2.2:8787</string>#' android-native/app/src/main/res/values/strings.xml
 
       - name: Build debug APK
         working-directory: android-native

@@ -28,15 +28,9 @@ def main():
     if len(edits) < 2 or connect is None:
         raise SystemExit("Connection form controls were not found")
 
-    server, token = edits[0], edits[1]
-    adb("shell", "input", "tap", str(server[0]), str(server[1]))
-    adb("shell", "input", "keyevent", "KEYCODE_MOVE_END")
-    for _ in range(80):
-        adb("shell", "input", "keyevent", "KEYCODE_DEL")
-    adb("shell", "input", "text", "http://10.0.2.2:8787")
-
+    token = edits[1]
     adb("shell", "input", "tap", str(token[0]), str(token[1]))
-    adb("shell", "input", "text", "SmokeTokenSmokeTokenSmokeToken123456")
+    adb("shell", "input", "text", "smoketokensmoketokensmoketoken123456")
     adb("shell", "input", "keyevent", "KEYCODE_BACK")
     time.sleep(1)
 
