@@ -40,12 +40,19 @@ jobs:
           script: |
             mkdir -p screenshots
             adb install -r android-native/app/build/outputs/apk/debug/app-debug.apk
+            adb shell settings put global window_animation_scale 0
+            adb shell settings put global transition_animation_scale 0
+            adb shell settings put global animator_duration_scale 0
             adb shell am start -n com.codex.remote/.MainActivity
             sleep 4
+            adb shell input tap 360 1060 || true
+            sleep 1
             adb exec-out screencap -p > screenshots/codex-relay-connect.png
             adb shell am force-stop com.codex.remote
             adb shell am start -n com.codex.remote/.MainActivity --ez demo_dashboard true
             sleep 4
+            adb shell input tap 360 1060 || true
+            sleep 1
             adb exec-out screencap -p > screenshots/codex-relay-dashboard.png
 
       - name: Upload screenshots
