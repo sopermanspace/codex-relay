@@ -80,12 +80,7 @@ jobs:
             set -eu
             mkdir -p smoke-screenshots
             adb wait-for-device
-            for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-              if adb shell pm path android >/dev/null 2>&1; then
-                break
-              fi
-              sleep 2
-            done
+            bash -lc 'for i in {1..20}; do adb shell pm path android >/dev/null 2>&1 && exit 0; sleep 2; done; exit 1'
             adb install -r android-native/app/build/outputs/apk/debug/app-debug.apk
             adb shell settings put global window_animation_scale 0
             adb shell settings put global transition_animation_scale 0
