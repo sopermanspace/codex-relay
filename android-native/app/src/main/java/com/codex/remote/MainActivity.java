@@ -1,7 +1,15 @@
 package com.codex.remote;
 
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.RadialGradient;
+import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -23,61 +31,59 @@ import android.widget.TextView;
 
 import org.json.JSONObject;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
-import java.net.Socket;
 import java.net.URL;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.SecureRandom;
-import java.util.Base64;
-
-import javax.net.ssl.SSLSocketFactory;
 
 public class MainActivity extends Activity {
+    private static final String PREFS = "codex_remote";
+    private static final int BG = Color.rgb(6, 7, 10);
+    private static final int PANEL = Color.rgb(18, 19, 23);
+    private static final int PANEL_2 = Color.rgb(28, 29, 34);
+    private static final int TEXT = Color.rgb(250, 250, 250);
+    private static final int MUTED = Color.rgb(190, 193, 201);
+    private static final int SOFT = Color.rgb(132, 137, 148);
+    private static final int ACCENT = Color.rgb(52, 211, 153);
+    private static final int ACCENT_DARK = Color.rgb(9, 92, 64);
+    private static final int ERROR = Color.rgb(252, 165, 165);
+
     private FrameLayout root;
-    private LinearLayout connectPanel;
-    private LinearLayout terminalPanel;
+    private LinearLayout shell;
+    private LinearLayout connectScreen;
+    private LinearLayout workspaceScreen;
     private EditText serverInput;
     private EditText tokenInput;
-    private EditText commandInput;
-    private TextView statusLabel;
-    private TextView terminalOutput;
-    private ScrollView terminalScroll;
+    private EditText promptInput;
+    private TextView statusPill;
+    private TextView connectionStatus;
+    private TextView resultTitle;
+    private TextView resultBody;
+    private TextView metaLabel;
     private ProgressBar progressBar;
     private Button unlockButton;
-    private Button sendButton;
-    private NativeCodexSocket socket;
+    private Button runButton;
+    private Button copyButton;
+    private SharedPreferences prefs;
     private String serverUrl = "";
     private String token = "";
+    private String lastOutput = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         configureWindow();
         buildLayout();
         showConnect();
     }
 
     @Override
-    protected void onDestroy() {
-        if (socket != null) {
-            socket.close();
-        }
-        super.onDestroy();
-    }
-
-    @Override
     public void onBackPressed() {
-        if (terminalPanel.getVisibility() == View.VISIBLE) {
-            if (socket != null) socket.close();
+        if (workspaceScreen.getVisibility() == View.VISIBLE) {
             showConnect();
             return;
         }
@@ -87,7 +93,7 @@ public class MainActivity extends Activity {
     private void configureWindow() {
         Window window = getWindow();
         window.setStatusBarColor(Color.TRANSPARENT);
-        window.setNavigationBarColor(Color.rgb(9, 9, 11));
+        window.setNavigationBarColor(BG);
         window.getDecorView().setSystemUiVisibility(
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
         );
@@ -99,240 +105,325 @@ public class MainActivity extends Activity {
 
     private void buildLayout() {
         root = new FrameLayout(this);
-        root.setBackgroundColor(Color.rgb(9, 9, 11));
+        root.setBackground(gradient(BG, Color.rgb(8, 13, 12)));
         setContentView(root);
-        buildConnectPanel();
-        buildTerminalPanel();
+
+        root.addView(new AmbientGradientView(this), fullFrame());
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        root.addView(scroll, fullFrame());
+
+        shell = new LinearLayout(this);
+        shell.setOrientation(LinearLayout.VERTICAL);
+        shell.setPadding(dp(20), dp(28), dp(20), dp(28));
+        scroll.addView(shell, new ScrollView.LayoutParams(
+            ScrollView.LayoutParams.MATCH_PARENT,
+            ScrollView.LayoutParams.WRAP_CONTENT
+        ));
+
+        buildConnectScreen();
+        buildWorkspaceScreen();
 
         progressBar = new ProgressBar(this);
-        progressBar.setIndeterminate(true);
         progressBar.setVisibility(View.GONE);
-        FrameLayout.LayoutParams progressParams = new FrameLayout.LayoutParams(dp(42), dp(42), Gravity.TOP | Gravity.END);
+        FrameLayout.LayoutParams progressParams = new FrameLayout.LayoutParams(dp(38), dp(38), Gravity.TOP | Gravity.END);
         progressParams.setMargins(0, dp(24), dp(24), 0);
         root.addView(progressBar, progressParams);
     }
 
-    private void buildConnectPanel() {
-        connectPanel = new LinearLayout(this);
-        connectPanel.setOrientation(LinearLayout.VERTICAL);
-        connectPanel.setGravity(Gravity.CENTER_HORIZONTAL);
-        connectPanel.setPadding(dp(24), dp(42), dp(24), dp(24));
-        root.addView(connectPanel, fullScreen());
+    private void buildConnectScreen() {
+        connectScreen = new LinearLayout(this);
+        connectScreen.setOrientation(LinearLayout.VERTICAL);
+        connectScreen.setGravity(Gravity.CENTER_HORIZONTAL);
+        shell.addView(connectScreen, matchWrap());
 
-        ImageView logo = new ImageView(this);
-        logo.setImageResource(R.drawable.codex_remote_mark);
-        LinearLayout.LayoutParams logoParams = new LinearLayout.LayoutParams(dp(104), dp(104));
-        logoParams.bottomMargin = dp(22);
-        connectPanel.addView(logo, logoParams);
+        ImageView hero = new ImageView(this);
+        hero.setImageResource(R.drawable.codex_operator_character);
+        hero.setAdjustViewBounds(true);
+        hero.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        LinearLayout.LayoutParams heroParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(280));
+        heroParams.topMargin = dp(4);
+        heroParams.bottomMargin = dp(10);
+        connectScreen.addView(hero, heroParams);
 
-        TextView eyebrow = text("NATIVE ANDROID CLIENT", 12, Color.rgb(52, 211, 153), Typeface.BOLD);
-        connectPanel.addView(eyebrow);
+        TextView eyebrow = labelCaps("SECURE COMMAND CENTER");
+        connectScreen.addView(eyebrow, centerWrap());
 
-        TextView title = text("Connect to Codex", 36, Color.WHITE, Typeface.BOLD);
+        TextView title = heroTitle("Codex Remote");
         title.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams titleParams = matchWrap();
         titleParams.topMargin = dp(8);
-        connectPanel.addView(title, titleParams);
+        connectScreen.addView(title, titleParams);
 
-        TextView subtitle = text("Direct WebSocket control. No browser shell.", 16, Color.rgb(212, 212, 216), Typeface.NORMAL);
+        TextView subtitle = body("Run high-trust coding tasks from Android with clean native output.");
         subtitle.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams subtitleParams = matchWrap();
         subtitleParams.topMargin = dp(8);
-        subtitleParams.bottomMargin = dp(28);
-        connectPanel.addView(subtitle, subtitleParams);
+        subtitleParams.bottomMargin = dp(24);
+        connectScreen.addView(subtitle, subtitleParams);
 
-        connectPanel.addView(label("Server URL"));
-        serverInput = input(getString(R.string.default_server_url), false);
-        connectPanel.addView(serverInput, fieldParams());
+        LinearLayout card = panel();
+        connectScreen.addView(card, matchWrap());
 
-        connectPanel.addView(label("Remote token"));
-        tokenInput = input("", true);
-        tokenInput.setHint("Remote token");
-        connectPanel.addView(tokenInput, fieldParams());
+        LinearLayout chips = new LinearLayout(this);
+        chips.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams chipsParams = matchWrap();
+        chipsParams.bottomMargin = dp(14);
+        card.addView(chips, chipsParams);
+        addMiniChip(chips, "Native");
+        addMiniChip(chips, "Private");
+        addMiniChip(chips, "Direct API");
 
-        unlockButton = primaryButton("Unlock");
-        unlockButton.setOnClickListener(view -> startNativeSession());
-        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(56));
-        buttonParams.topMargin = dp(18);
-        connectPanel.addView(unlockButton, buttonParams);
+        card.addView(formLabel("Server URL"));
+        serverInput = input(prefs.getString("server", getString(R.string.default_server_url)), false, "http://192.168.18.182:8787");
+        card.addView(serverInput, fieldParams());
 
-        statusLabel = text("Locked", 13, Color.rgb(161, 161, 170), Typeface.NORMAL);
-        statusLabel.setGravity(Gravity.CENTER);
+        card.addView(formLabel("Remote token"));
+        tokenInput = input(prefs.getString("token", ""), true, "Paste token");
+        card.addView(tokenInput, fieldParams());
+
+        unlockButton = primaryButton("Connect");
+        unlockButton.setOnClickListener(view -> connect());
+        LinearLayout.LayoutParams unlockParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58));
+        unlockParams.topMargin = dp(18);
+        card.addView(unlockButton, unlockParams);
+
+        connectionStatus = caption("Ready");
+        connectionStatus.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams statusParams = matchWrap();
         statusParams.topMargin = dp(16);
-        connectPanel.addView(statusLabel, statusParams);
+        connectScreen.addView(connectionStatus, statusParams);
     }
 
-    private void buildTerminalPanel() {
-        terminalPanel = new LinearLayout(this);
-        terminalPanel.setOrientation(LinearLayout.VERTICAL);
-        terminalPanel.setPadding(dp(14), dp(22), dp(14), dp(14));
-        terminalPanel.setVisibility(View.GONE);
-        root.addView(terminalPanel, fullScreen());
+    private void buildWorkspaceScreen() {
+        workspaceScreen = new LinearLayout(this);
+        workspaceScreen.setOrientation(LinearLayout.VERTICAL);
+        workspaceScreen.setVisibility(View.GONE);
+        shell.addView(workspaceScreen, matchWrap());
 
         LinearLayout header = new LinearLayout(this);
-        header.setGravity(Gravity.CENTER_VERTICAL);
         header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setPadding(0, 0, 0, dp(12));
-        terminalPanel.addView(header, matchWrap());
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        workspaceScreen.addView(header, matchWrap());
 
-        TextView title = text("Codex Remote", 20, Color.WHITE, Typeface.BOLD);
-        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
-        header.addView(title, titleParams);
+        ImageView appMark = new ImageView(this);
+        appMark.setImageResource(R.drawable.codex_remote_hero);
+        appMark.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        LinearLayout.LayoutParams markParams = new LinearLayout.LayoutParams(dp(48), dp(48));
+        markParams.rightMargin = dp(12);
+        header.addView(appMark, markParams);
 
-        Button close = quietButton("Close");
-        close.setOnClickListener(view -> {
-            if (socket != null) socket.close();
-            showConnect();
-        });
-        header.addView(close, new LinearLayout.LayoutParams(dp(88), dp(44)));
+        LinearLayout titles = new LinearLayout(this);
+        titles.setOrientation(LinearLayout.VERTICAL);
+        header.addView(titles, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        titles.addView(sectionTitle("Command Center"));
+        metaLabel = caption("Connected");
+        titles.addView(metaLabel);
 
-        terminalScroll = new ScrollView(this);
-        terminalScroll.setFillViewport(true);
-        terminalScroll.setBackground(rounded(Color.rgb(5, 5, 5), Color.argb(44, 250, 250, 250), 1, 12));
-        terminalOutput = text("", 13, Color.rgb(244, 244, 245), Typeface.NORMAL);
-        terminalOutput.setTypeface(Typeface.MONOSPACE);
-        terminalOutput.setPadding(dp(14), dp(14), dp(14), dp(14));
-        terminalScroll.addView(terminalOutput, fullScreen());
-        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1);
-        terminalPanel.addView(terminalScroll, scrollParams);
+        Button close = quietButton("Lock");
+        close.setOnClickListener(view -> showConnect());
+        header.addView(close, new LinearLayout.LayoutParams(dp(92), dp(48)));
 
-        LinearLayout quickKeys = new LinearLayout(this);
-        quickKeys.setOrientation(LinearLayout.HORIZONTAL);
-        quickKeys.setPadding(0, dp(10), 0, dp(8));
-        terminalPanel.addView(quickKeys, matchWrap());
-        addKey(quickKeys, "Esc", "\u001b");
-        addKey(quickKeys, "Tab", "\t");
-        addKey(quickKeys, "Up", "\u001b[A");
-        addKey(quickKeys, "Down", "\u001b[B");
-        addKey(quickKeys, "Ctrl+C", "\u0003");
+        LinearLayout statusCard = panel();
+        LinearLayout.LayoutParams statusCardParams = matchWrap();
+        statusCardParams.topMargin = dp(18);
+        workspaceScreen.addView(statusCard, statusCardParams);
 
-        commandInput = input("", false);
-        commandInput.setHint("Command");
-        terminalPanel.addView(commandInput, fieldParams());
+        LinearLayout statusRow = new LinearLayout(this);
+        statusRow.setGravity(Gravity.CENTER_VERTICAL);
+        statusRow.setOrientation(LinearLayout.HORIZONTAL);
+        statusCard.addView(statusRow, matchWrap());
+        statusPill = chip("Online");
+        statusRow.addView(statusPill, new LinearLayout.LayoutParams(dp(92), dp(36)));
+        TextView mode = caption("codex exec");
+        LinearLayout.LayoutParams modeParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        modeParams.leftMargin = dp(12);
+        statusRow.addView(mode, modeParams);
+        TextView statusText = body("Tell Codex what to do. The Mac app-server runs the task and returns a readable result.");
+        LinearLayout.LayoutParams statusTextParams = matchWrap();
+        statusTextParams.topMargin = dp(12);
+        statusCard.addView(statusText, statusTextParams);
 
-        sendButton = primaryButton("Send");
-        sendButton.setOnClickListener(view -> sendCommand());
-        LinearLayout.LayoutParams sendParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(54));
-        sendParams.topMargin = dp(10);
-        terminalPanel.addView(sendButton, sendParams);
+        TextView promptLabel = formLabel("Task");
+        LinearLayout.LayoutParams promptLabelParams = matchWrap();
+        promptLabelParams.topMargin = dp(20);
+        workspaceScreen.addView(promptLabel, promptLabelParams);
+
+        promptInput = input("", false, "Example: Summarize the repo and list the next 3 improvements.");
+        promptInput.setSingleLine(false);
+        promptInput.setMinLines(4);
+        promptInput.setGravity(Gravity.TOP | Gravity.START);
+        workspaceScreen.addView(promptInput, tallFieldParams());
+
+        runButton = primaryButton("Run Codex");
+        runButton.setOnClickListener(view -> runCommand());
+        LinearLayout.LayoutParams runParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58));
+        runParams.topMargin = dp(14);
+        workspaceScreen.addView(runButton, runParams);
+
+        LinearLayout resultCard = panel();
+        LinearLayout.LayoutParams resultParams = matchWrap();
+        resultParams.topMargin = dp(20);
+        workspaceScreen.addView(resultCard, resultParams);
+
+        LinearLayout resultHeader = new LinearLayout(this);
+        resultHeader.setGravity(Gravity.CENTER_VERTICAL);
+        resultCard.addView(resultHeader, matchWrap());
+        resultTitle = sectionTitle("Result");
+        resultHeader.addView(resultTitle, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        copyButton = quietButton("Copy");
+        copyButton.setEnabled(false);
+        copyButton.setOnClickListener(view -> copyLastOutput());
+        resultHeader.addView(copyButton, new LinearLayout.LayoutParams(dp(86), dp(42)));
+
+        resultBody = mono("No output yet. Your next result will appear here as clean text instead of broken terminal frames.");
+        LinearLayout.LayoutParams bodyParams = matchWrap();
+        bodyParams.topMargin = dp(14);
+        resultCard.addView(resultBody, bodyParams);
     }
 
-    private void startNativeSession() {
-        serverUrl = serverInput.getText().toString().trim();
-        token = tokenInput.getText().toString().trim();
-        if (!isValidHttpUrl(serverUrl)) {
-            setStatus("Enter a valid HTTP or HTTPS server URL.", true);
+    private void connect() {
+        String nextServer = serverInput.getText().toString().trim();
+        String nextToken = tokenInput.getText().toString().trim();
+        if (!isValidHttpUrl(nextServer)) {
+            setConnectStatus("Enter a valid HTTP or HTTPS URL.", true);
             return;
         }
-        if (token.isEmpty()) {
-            setStatus("Remote token is required.", true);
+        if (nextToken.isEmpty()) {
+            setConnectStatus("Remote token is required.", true);
             return;
         }
 
+        serverUrl = trimSlash(nextServer);
+        token = nextToken;
         progressBar.setVisibility(View.VISIBLE);
         unlockButton.setEnabled(false);
-        setStatus("Connecting", false);
+        setConnectStatus("Checking secure connection...", false);
 
         new Thread(() -> {
             try {
-                String sessionId = createSession(serverUrl, token);
-                runOnUiThread(() -> showTerminal(sessionId));
-                socket = new NativeCodexSocket(serverUrl, token, sessionId, new NativeCodexSocket.Listener() {
-                    @Override
-                    public void onOpen() {
-                        appendTerminal("Connected to Codex.\n");
-                    }
-
-                    @Override
-                    public void onOutput(String output) {
-                        appendTerminal(stripAnsi(output));
-                    }
-
-                    @Override
-                    public void onClosed(String reason) {
-                        appendTerminal("\nDisconnected: " + reason + "\n");
-                    }
-
-                    @Override
-                    public void onError(Exception error) {
-                        appendTerminal("\nConnection error: " + error.getMessage() + "\n");
-                    }
-                });
-                socket.connect();
+                verifyAuth();
+                prefs.edit().putString("server", serverUrl).putString("token", token).apply();
+                runOnUiThread(this::showWorkspace);
             } catch (Exception error) {
+                runOnUiThread(() -> setConnectStatus(error.getMessage(), true));
+            } finally {
                 runOnUiThread(() -> {
                     progressBar.setVisibility(View.GONE);
                     unlockButton.setEnabled(true);
-                    setStatus(error.getMessage(), true);
                 });
             }
         }).start();
     }
 
-    private String createSession(String baseUrl, String tokenValue) throws Exception {
-        URL url = new URL(trimSlash(baseUrl) + "/api/session");
+    private void runCommand() {
+        String prompt = promptInput.getText().toString().trim();
+        if (prompt.isEmpty()) {
+            setResult("Task required", "Write a task for Codex first.", true);
+            return;
+        }
+
+        setBusy(true);
+        setResult("Running", "Codex is working on your Mac...", false);
+
+        new Thread(() -> {
+            long started = System.currentTimeMillis();
+            try {
+                JSONObject response = postCommand(prompt);
+                long seconds = Math.max(1, (System.currentTimeMillis() - started) / 1000);
+                boolean ok = response.optBoolean("ok", false);
+                String output = response.optString("output", "");
+                if (output.trim().isEmpty()) output = ok ? "Done." : "No output returned.";
+                String title = ok ? "Completed in " + seconds + "s" : "Finished with exit code " + response.optInt("exitCode", -1);
+                runOnUiThread(() -> setResult(title, output, !ok));
+            } catch (Exception error) {
+                runOnUiThread(() -> setResult("Connection failed", error.getMessage(), true));
+            } finally {
+                runOnUiThread(() -> setBusy(false));
+            }
+        }).start();
+    }
+
+    private JSONObject postCommand(String prompt) throws Exception {
+        URL url = new URL(serverUrl + "/api/command");
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod("POST");
-        connection.setConnectTimeout(10000);
-        connection.setReadTimeout(10000);
+        connection.setConnectTimeout(12000);
+        connection.setReadTimeout(600000);
         connection.setDoOutput(true);
         connection.setRequestProperty("Content-Type", "application/json");
-        connection.setRequestProperty("Authorization", "Bearer " + tokenValue);
-        byte[] body = "{\"cols\":80,\"rows\":28}".getBytes(StandardCharsets.UTF_8);
-        try (OutputStream output = connection.getOutputStream()) {
-            output.write(body);
+        connection.setRequestProperty("Authorization", "Bearer " + token);
+        JSONObject body = new JSONObject();
+        body.put("prompt", prompt);
+        byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
+        try (OutputStream out = connection.getOutputStream()) {
+            out.write(payload);
         }
+
+        int status = connection.getResponseCode();
+        String response = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
+        if (status == 401) throw new Exception("Token rejected.");
+        if (status < 200 || status >= 300) {
+            String message = response.trim().isEmpty() ? "Server returned " + status + "." : response;
+            throw new Exception(message);
+        }
+        return new JSONObject(response);
+    }
+
+    private void verifyAuth() throws Exception {
+        URL url = new URL(serverUrl + "/api/auth");
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(10000);
+        connection.setReadTimeout(10000);
+        connection.setRequestProperty("Authorization", "Bearer " + token);
         int status = connection.getResponseCode();
         if (status == 401) throw new Exception("Token rejected.");
         if (status < 200 || status >= 300) throw new Exception("Server returned " + status + ".");
-        String response = readAll(connection.getInputStream());
-        return new JSONObject(response).getString("id");
-    }
-
-    private void showTerminal(String sessionId) {
-        progressBar.setVisibility(View.GONE);
-        unlockButton.setEnabled(true);
-        terminalOutput.setText("Session " + sessionId.substring(0, Math.min(8, sessionId.length())) + "\n");
-        connectPanel.setVisibility(View.GONE);
-        terminalPanel.setVisibility(View.VISIBLE);
+        JSONObject response = new JSONObject(readAll(connection.getInputStream()));
+        if (!response.optBoolean("ok", false)) throw new Exception("Server did not confirm access.");
     }
 
     private void showConnect() {
+        connectScreen.setVisibility(View.VISIBLE);
+        workspaceScreen.setVisibility(View.GONE);
         progressBar.setVisibility(View.GONE);
-        connectPanel.setVisibility(View.VISIBLE);
-        terminalPanel.setVisibility(View.GONE);
-        unlockButton.setEnabled(true);
-        setStatus("Locked", false);
+        setConnectStatus("Ready", false);
     }
 
-    private void sendCommand() {
-        String command = commandInput.getText().toString();
-        if (command.trim().isEmpty() || socket == null) return;
-        socket.sendInput(command + "\n");
-        commandInput.setText("");
+    private void showWorkspace() {
+        connectScreen.setVisibility(View.GONE);
+        workspaceScreen.setVisibility(View.VISIBLE);
+        progressBar.setVisibility(View.GONE);
+        metaLabel.setText(serverUrl.replace("http://", "").replace("https://", ""));
+        setResult("Result", "No output yet. Your next result will appear here as clean text instead of broken terminal frames.", false);
     }
 
-    private void addKey(LinearLayout parent, String label, String value) {
-        Button button = quietButton(label);
-        button.setOnClickListener(view -> {
-            if (socket != null) socket.sendInput(value);
-        });
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(42), 1);
-        params.setMargins(dp(3), 0, dp(3), 0);
-        parent.addView(button, params);
+    private void setBusy(boolean busy) {
+        progressBar.setVisibility(busy ? View.VISIBLE : View.GONE);
+        runButton.setEnabled(!busy);
+        runButton.setText(busy ? "Running..." : "Run Codex");
+        statusPill.setText(busy ? "Running" : "Online");
     }
 
-    private void appendTerminal(String value) {
-        runOnUiThread(() -> {
-            terminalOutput.append(value);
-            terminalScroll.post(() -> terminalScroll.fullScroll(View.FOCUS_DOWN));
-        });
+    private void setConnectStatus(String message, boolean error) {
+        connectionStatus.setText(message);
+        connectionStatus.setTextColor(error ? ERROR : SOFT);
     }
 
-    private void setStatus(String value, boolean error) {
-        statusLabel.setText(value);
-        statusLabel.setTextColor(error ? Color.rgb(252, 165, 165) : Color.rgb(161, 161, 170));
+    private void setResult(String title, String body, boolean error) {
+        resultTitle.setText(title);
+        resultTitle.setTextColor(error ? ERROR : TEXT);
+        resultBody.setText(body);
+        lastOutput = body;
+        copyButton.setEnabled(!body.trim().isEmpty() && !"No output yet.".equals(body));
+    }
+
+    private void copyLastOutput() {
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        clipboard.setPrimaryClip(ClipData.newPlainText("Codex output", lastOutput));
+        resultTitle.setText("Copied");
     }
 
     private boolean isValidHttpUrl(String value) {
@@ -341,66 +432,156 @@ public class MainActivity extends Activity {
         return uri.getHost() != null && ("http".equals(scheme) || "https".equals(scheme));
     }
 
-    private EditText input(String value, boolean password) {
+    private LinearLayout panel() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(18), dp(18), dp(18));
+        panel.setBackground(rounded(PANEL, Color.argb(54, 250, 250, 250), 1, 24));
+        return panel;
+    }
+
+    private void addMiniChip(LinearLayout parent, String value) {
+        TextView chip = new TextView(this);
+        chip.setText(value);
+        chip.setTextColor(Color.rgb(204, 251, 241));
+        chip.setTextSize(12);
+        chip.setGravity(Gravity.CENTER);
+        chip.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        chip.setBackground(rounded(Color.rgb(12, 45, 36), Color.argb(80, 52, 211, 153), 1, 16));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(34), 1);
+        params.setMargins(dp(3), 0, dp(3), 0);
+        parent.addView(chip, params);
+    }
+
+    private EditText input(String value, boolean password, String hint) {
         EditText input = new EditText(this);
         input.setText(value);
-        input.setSingleLine(false);
+        input.setHint(hint);
         input.setTextSize(16);
-        input.setTextColor(Color.WHITE);
-        input.setHintTextColor(Color.rgb(113, 113, 122));
+        input.setTextColor(TEXT);
+        input.setHintTextColor(Color.rgb(102, 107, 118));
         input.setPadding(dp(16), 0, dp(16), 0);
-        input.setBackground(rounded(Color.rgb(5, 5, 5), Color.argb(42, 250, 250, 250), 1, 12));
-        if (password) {
-            input.setSingleLine(true);
-            input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        } else {
-            input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
-        }
+        input.setBackground(rounded(Color.rgb(3, 4, 6), Color.argb(48, 250, 250, 250), 1, 16));
+        input.setSingleLine(!password);
+        input.setInputType(password
+            ? InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD
+            : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         return input;
     }
 
-    private TextView label(String value) {
-        TextView label = text(value, 13, Color.rgb(161, 161, 170), Typeface.NORMAL);
-        LinearLayout.LayoutParams params = matchWrap();
-        params.topMargin = dp(14);
-        label.setLayoutParams(params);
-        return label;
-    }
-
-    private Button primaryButton(String value) {
+    private Button primaryButton(String text) {
         Button button = new Button(this);
-        button.setText(value);
+        button.setText(text);
         button.setAllCaps(false);
-        button.setTextColor(Color.rgb(4, 19, 13));
+        button.setTextColor(Color.rgb(2, 18, 12));
         button.setTextSize(16);
         button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        button.setBackground(rounded(Color.rgb(52, 211, 153), Color.argb(90, 255, 255, 255), 1, 12));
+        button.setBackground(rounded(ACCENT, Color.argb(105, 255, 255, 255), 1, 18));
         return button;
     }
 
-    private Button quietButton(String value) {
+    private Button quietButton(String text) {
         Button button = new Button(this);
-        button.setText(value);
+        button.setText(text);
         button.setAllCaps(false);
-        button.setTextColor(Color.rgb(244, 244, 245));
+        button.setTextColor(TEXT);
         button.setTextSize(13);
         button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        button.setBackground(rounded(Color.rgb(39, 39, 42), Color.argb(34, 250, 250, 250), 1, 10));
+        button.setBackground(rounded(PANEL_2, Color.argb(46, 250, 250, 250), 1, 16));
         return button;
     }
 
-    private TextView text(String value, int sizeSp, int color, int style) {
+    private TextView labelCaps(String value) {
         TextView text = new TextView(this);
         text.setText(value);
-        text.setTextSize(sizeSp);
-        text.setTextColor(color);
-        text.setTypeface(Typeface.DEFAULT, style);
-        text.setIncludeFontPadding(true);
+        text.setTextColor(ACCENT);
+        text.setTextSize(12);
+        text.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        text.setLetterSpacing(0.08f);
+        return text;
+    }
+
+    private TextView formLabel(String value) {
+        TextView text = caption(value);
+        LinearLayout.LayoutParams params = matchWrap();
+        params.topMargin = dp(14);
+        text.setLayoutParams(params);
+        return text;
+    }
+
+    private TextView title(String value) {
+        TextView text = new TextView(this);
+        text.setText(value);
+        text.setTextColor(TEXT);
+        text.setTextSize(34);
+        text.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        text.setIncludeFontPadding(false);
+        return text;
+    }
+
+    private TextView heroTitle(String value) {
+        TextView text = title(value);
+        text.setTextSize(42);
+        return text;
+    }
+
+    private TextView sectionTitle(String value) {
+        TextView text = new TextView(this);
+        text.setText(value);
+        text.setTextColor(TEXT);
+        text.setTextSize(18);
+        text.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        return text;
+    }
+
+    private TextView body(String value) {
+        TextView text = new TextView(this);
+        text.setText(value);
+        text.setTextColor(MUTED);
+        text.setTextSize(16);
+        text.setLineSpacing(dp(2), 1f);
+        return text;
+    }
+
+    private TextView caption(String value) {
+        TextView text = new TextView(this);
+        text.setText(value);
+        text.setTextColor(SOFT);
+        text.setTextSize(13);
+        return text;
+    }
+
+    private TextView chip(String value) {
+        TextView text = new TextView(this);
+        text.setText(value);
+        text.setTextColor(Color.rgb(187, 247, 208));
+        text.setTextSize(13);
+        text.setGravity(Gravity.CENTER);
+        text.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        text.setBackground(rounded(ACCENT_DARK, Color.argb(78, 52, 211, 153), 1, 18));
+        return text;
+    }
+
+    private TextView mono(String value) {
+        TextView text = new TextView(this);
+        text.setText(value);
+        text.setTextColor(Color.rgb(226, 232, 240));
+        text.setTextSize(14);
+        text.setTypeface(Typeface.MONOSPACE);
+        text.setLineSpacing(dp(3), 1f);
+        text.setPadding(dp(14), dp(14), dp(14), dp(14));
+        text.setBackground(rounded(Color.rgb(2, 3, 5), Color.argb(36, 250, 250, 250), 1, 16));
         return text;
     }
 
     private LinearLayout.LayoutParams fieldParams() {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(56));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58));
+        params.topMargin = dp(8);
+        return params;
+    }
+
+    private LinearLayout.LayoutParams tallFieldParams() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(142));
         params.topMargin = dp(8);
         return params;
     }
@@ -409,7 +590,13 @@ public class MainActivity extends Activity {
         return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
     }
 
-    private FrameLayout.LayoutParams fullScreen() {
+    private LinearLayout.LayoutParams centerWrap() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.gravity = Gravity.CENTER_HORIZONTAL;
+        return params;
+    }
+
+    private FrameLayout.LayoutParams fullFrame() {
         return new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
     }
 
@@ -421,16 +608,23 @@ public class MainActivity extends Activity {
         return drawable;
     }
 
+    private GradientDrawable gradient(int start, int end) {
+        GradientDrawable drawable = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{start, end});
+        drawable.setDither(true);
+        return drawable;
+    }
+
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
     private static String readAll(InputStream stream) throws Exception {
+        if (stream == null) return "";
         BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8));
         StringBuilder builder = new StringBuilder();
         String line;
-        while ((line = reader.readLine()) != null) builder.append(line);
-        return builder.toString();
+        while ((line = reader.readLine()) != null) builder.append(line).append('\n');
+        return builder.toString().trim();
     }
 
     private static String trimSlash(String value) {
@@ -438,202 +632,41 @@ public class MainActivity extends Activity {
         return value;
     }
 
-    private static String stripAnsi(String value) {
-        return value.replaceAll("\\u001B\\[[0-9;?]*[ -/]*[@-~]", "");
-    }
+    private static final class AmbientGradientView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-    private static final class NativeCodexSocket {
-        interface Listener {
-            void onOpen();
-            void onOutput(String output);
-            void onClosed(String reason);
-            void onError(Exception error);
+        AmbientGradientView(Context context) {
+            super(context);
+            setAlpha(0.88f);
         }
 
-        private final String baseUrl;
-        private final String token;
-        private final String sessionId;
-        private final Listener listener;
-        private Socket socket;
-        private InputStream input;
-        private OutputStream output;
-        private volatile boolean open;
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            int width = getWidth();
+            int height = getHeight();
 
-        NativeCodexSocket(String baseUrl, String token, String sessionId, Listener listener) {
-            this.baseUrl = baseUrl;
-            this.token = token;
-            this.sessionId = sessionId;
-            this.listener = listener;
-        }
+            paint.setShader(new RadialGradient(
+                width * 0.2f,
+                height * 0.05f,
+                width * 0.72f,
+                new int[]{Color.argb(118, 16, 185, 129), Color.argb(24, 16, 185, 129), Color.TRANSPARENT},
+                new float[]{0f, 0.42f, 1f},
+                Shader.TileMode.CLAMP
+            ));
+            canvas.drawCircle(width * 0.2f, height * 0.05f, width * 0.72f, paint);
 
-        void connect() {
-            new Thread(() -> {
-                try {
-                    Uri uri = Uri.parse(baseUrl);
-                    boolean secure = "https".equals(uri.getScheme());
-                    int port = uri.getPort() != -1 ? uri.getPort() : (secure ? 443 : 80);
-                    String host = uri.getHost();
-                    if (secure) {
-                        socket = SSLSocketFactory.getDefault().createSocket(host, port);
-                    } else {
-                        socket = new Socket(host, port);
-                    }
-                    input = new BufferedInputStream(socket.getInputStream());
-                    output = new BufferedOutputStream(socket.getOutputStream());
-                    handshake(host, port, uri.getPath());
-                    open = true;
-                    listener.onOpen();
-                    sendJson("{\"type\":\"resize\",\"cols\":80,\"rows\":28}");
-                    readLoop();
-                } catch (Exception error) {
-                    listener.onError(error);
-                    close();
-                }
-            }).start();
-        }
+            paint.setShader(new RadialGradient(
+                width * 0.88f,
+                height * 0.42f,
+                width * 0.58f,
+                new int[]{Color.argb(72, 255, 255, 255), Color.argb(16, 255, 255, 255), Color.TRANSPARENT},
+                new float[]{0f, 0.36f, 1f},
+                Shader.TileMode.CLAMP
+            ));
+            canvas.drawCircle(width * 0.88f, height * 0.42f, width * 0.58f, paint);
 
-        void sendInput(String data) {
-            sendJson("{\"type\":\"input\",\"data\":" + JSONObject.quote(data) + "}");
-        }
-
-        void close() {
-            open = false;
-            try {
-                if (socket != null) socket.close();
-            } catch (Exception ignored) {
-            }
-        }
-
-        private void handshake(String host, int port, String path) throws Exception {
-            String key = makeWebSocketKey();
-            String requestPath = (path == null || path.isEmpty() ? "/" : path)
-                + "?session=" + Uri.encode(sessionId)
-                + "&token=" + Uri.encode(token);
-            String request = "GET " + requestPath + " HTTP/1.1\r\n"
-                + "Host: " + host + ":" + port + "\r\n"
-                + "Upgrade: websocket\r\n"
-                + "Connection: Upgrade\r\n"
-                + "Sec-WebSocket-Key: " + key + "\r\n"
-                + "Sec-WebSocket-Version: 13\r\n\r\n";
-            output.write(request.getBytes(StandardCharsets.US_ASCII));
-            output.flush();
-
-            String response = readHeaders(input);
-            if (!response.startsWith("HTTP/1.1 101")) {
-                throw new Exception("WebSocket upgrade failed.");
-            }
-            String accept = headerValue(response, "Sec-WebSocket-Accept");
-            String expected = expectedAccept(key);
-            if (!expected.equals(accept)) {
-                throw new Exception("WebSocket handshake rejected.");
-            }
-        }
-
-        private void readLoop() throws Exception {
-            while (open) {
-                int first = input.read();
-                if (first == -1) break;
-                int second = input.read();
-                if (second == -1) break;
-                int opcode = first & 0x0F;
-                long length = second & 0x7F;
-                if (length == 126) {
-                    length = ((input.read() & 0xFF) << 8) | (input.read() & 0xFF);
-                } else if (length == 127) {
-                    length = 0;
-                    for (int i = 0; i < 8; i++) length = (length << 8) | (input.read() & 0xFF);
-                }
-                byte[] payload = new byte[(int) length];
-                int offset = 0;
-                while (offset < payload.length) {
-                    int read = input.read(payload, offset, payload.length - offset);
-                    if (read == -1) throw new Exception("Socket closed.");
-                    offset += read;
-                }
-                if (opcode == 8) break;
-                if (opcode == 1) handleMessage(new String(payload, StandardCharsets.UTF_8));
-            }
-            listener.onClosed("socket closed");
-        }
-
-        private void handleMessage(String json) throws Exception {
-            JSONObject event = new JSONObject(json);
-            String type = event.optString("type");
-            if ("output".equals(type)) {
-                listener.onOutput(event.optString("data"));
-            } else if ("exit".equals(type)) {
-                listener.onClosed("Codex exited " + event.optInt("exitCode"));
-            }
-        }
-
-        private synchronized void sendJson(String json) {
-            if (!open || output == null) return;
-            try {
-                byte[] data = json.getBytes(StandardCharsets.UTF_8);
-                ByteArrayOutputStream frame = new ByteArrayOutputStream();
-                frame.write(0x81);
-                if (data.length < 126) {
-                    frame.write(0x80 | data.length);
-                } else if (data.length <= 65535) {
-                    frame.write(0x80 | 126);
-                    frame.write((data.length >> 8) & 0xFF);
-                    frame.write(data.length & 0xFF);
-                } else {
-                    frame.write(0x80 | 127);
-                    frame.write(ByteBuffer.allocate(8).putLong(data.length).array());
-                }
-                byte[] mask = new byte[4];
-                new SecureRandom().nextBytes(mask);
-                frame.write(mask);
-                for (int i = 0; i < data.length; i++) {
-                    frame.write(data[i] ^ mask[i % 4]);
-                }
-                output.write(frame.toByteArray());
-                output.flush();
-            } catch (Exception error) {
-                listener.onError(error);
-            }
-        }
-
-        private static String makeWebSocketKey() {
-            byte[] random = new byte[16];
-            new SecureRandom().nextBytes(random);
-            return Base64.getEncoder().encodeToString(random);
-        }
-
-        private static String expectedAccept(String key) throws Exception {
-            MessageDigest digest = MessageDigest.getInstance("SHA-1");
-            byte[] hashed = digest.digest((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").getBytes(StandardCharsets.US_ASCII));
-            return Base64.getEncoder().encodeToString(hashed);
-        }
-
-        private static String headerValue(String response, String name) {
-            String prefix = name.toLowerCase() + ":";
-            String[] lines = response.split("\\r?\\n");
-            for (String line : lines) {
-                if (line.toLowerCase().startsWith(prefix)) {
-                    return line.substring(line.indexOf(':') + 1).trim();
-                }
-            }
-            return "";
-        }
-
-        private static String readHeaders(InputStream input) throws Exception {
-            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-            int previous3 = -1;
-            int previous2 = -1;
-            int previous1 = -1;
-            int current;
-            while ((current = input.read()) != -1) {
-                buffer.write(current);
-                if (previous3 == '\r' && previous2 == '\n' && previous1 == '\r' && current == '\n') {
-                    break;
-                }
-                previous3 = previous2;
-                previous2 = previous1;
-                previous1 = current;
-            }
-            return buffer.toString(StandardCharsets.US_ASCII.name());
+            paint.setShader(null);
         }
     }
 }

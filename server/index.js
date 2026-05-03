@@ -3,6 +3,7 @@ import 'dotenv/config';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import express from 'express';
@@ -53,6 +54,20 @@ app.get('/api/config', (req, res) => {
     appName: 'Codex Remote',
     workdir: codexWorkdir,
     tokenRequired: true
+  });
+});
+
+app.get('/api/auth', (req, res) => {
+  const token = getBearerToken(req);
+  if (!isAuthorized(token)) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  res.json({
+    ok: true,
+    appName: 'Codex Remote',
+    workdir: codexWorkdir
   });
 });
 
@@ -107,6 +122,37 @@ app.post('/api/session', (req, res) => {
 
   sessions.set(id, session);
   res.json({ id });
+});
+
+app.post('/api/command', async (req, res) => {
+  const token = getBearerToken(req);
+  if (!isAuthorized(token)) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+  if (!prompt) {
+    res.status(400).json({ error: 'Prompt is required' });
+    return;
+  }
+
+  const startedAt = Date.now();
+  try {
+    const result = await runCodexExec(prompt);
+    res.json({
+      ok: result.exitCode === 0,
+      exitCode: result.exitCode,
+      output: result.output,
+      durationMs: Date.now() - startedAt
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error.message,
+      durationMs: Date.now() - startedAt
+    });
+  }
 });
 
 server.on('upgrade', (req, socket, head) => {
@@ -206,4 +252,64 @@ function getNetworkUrl(selectedPort) {
     }
   }
   return null;
+}
+
+function runCodexExec(prompt) {
+  const args = [
+    '-a',
+    process.env.CODEX_APPROVAL_POLICY || 'never',
+    '--sandbox',
+    process.env.CODEX_SANDBOX || 'workspace-write',
+    '-C',
+    codexWorkdir,
+    'exec',
+    '--color',
+    'never',
+    '--skip-git-repo-check',
+    prompt
+  ];
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(codexCommand, args, {
+      cwd: codexWorkdir,
+      env: {
+        ...process.env,
+        TERM: 'dumb',
+        NO_COLOR: '1'
+      }
+    });
+
+    let output = '';
+    let settled = false;
+    const timeout = setTimeout(() => {
+      settled = true;
+      child.kill('SIGTERM');
+      reject(new Error('Codex command timed out.'));
+    }, Number(process.env.CODEX_COMMAND_TIMEOUT_MS || 600000));
+
+    child.stdout.on('data', (chunk) => {
+      output += chunk.toString();
+    });
+
+    child.stderr.on('data', (chunk) => {
+      output += chunk.toString();
+    });
+
+    child.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(error);
+    });
+
+    child.on('close', (exitCode) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve({
+        exitCode,
+        output: output.trim()
+      });
+    });
+  });
 }

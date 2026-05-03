@@ -10,7 +10,7 @@ cp .env.example .env
 npm start
 ```
 
-Keep this app-server running on your Mac. The native Android app connects to it directly over HTTP and WebSocket.
+Keep this app-server running on your Mac. The native Android app connects to it through authenticated HTTP APIs.
 
 ## Native Android App
 
@@ -20,7 +20,7 @@ The native app project lives in:
 android-native/
 ```
 
-It is a real Android app with its own launcher icon, native connect screen, native terminal output, and direct WebSocket control of the Codex app-server. It does not use WebView.
+It is a real Android app with its own launcher icon, generated character artwork, native connect screen, native command workspace, and clean Codex result rendering. It does not use WebView.
 
 Build after installing Android Studio or a working JDK/Gradle setup:
 

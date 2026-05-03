@@ -1,13 +1,14 @@
 # Codex Remote Android App
 
-Native Android client for the Codex app-server. This is not a browser install flow and not a WebView shell: it builds as an Android app with its own launcher icon, native connect screen, native terminal output, and direct WebSocket control.
+Native Android client for the Codex app-server. This is not a browser install flow and not a WebView shell: it builds as an Android app with its own launcher icon, generated character artwork, native connect screen, native command workspace, and clean Codex result rendering.
 
 ## What It Does
 
 - Creates Codex sessions through the app-server HTTP API.
 - Uses a native connection screen for the server URL and remote token.
-- Connects directly to the app-server WebSocket protocol.
-- Renders terminal output in native Android views.
+- Verifies access through the app-server auth API.
+- Sends tasks through the app-server command API.
+- Renders Codex results in native Android views.
 - Allows local-network HTTP during development, plus HTTPS for remote tunnel use.
 
 ## Build
