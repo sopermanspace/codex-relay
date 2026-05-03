@@ -77,6 +77,7 @@ public class MainActivity extends Activity {
     private String lastOutput = "";
     private String selectedProjectPath = "";
     private String selectedProjectName = "Default workspace";
+    private JSONArray loadedProjects = new JSONArray();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -581,6 +582,7 @@ public class MainActivity extends Activity {
 
     private void renderProjects(JSONArray projects) {
         if (projectList == null) return;
+        loadedProjects = projects;
         projectList.removeAllViews();
         if (projects.length() == 0) {
             projectList.addView(projectRow("No projects found", "Add folders under Documents, Desktop, or CODEX_PROJECT_ROOTS.", false, null), matchWrap());
@@ -588,6 +590,16 @@ public class MainActivity extends Activity {
         }
 
         int count = Math.min(projects.length(), 8);
+        if (selectedProjectPath.trim().isEmpty()) {
+            JSONObject firstProject = projects.optJSONObject(0);
+            if (firstProject != null) {
+                applyProjectSelection(
+                    firstProject.optString("name", "Project"),
+                    firstProject.optString("path", "")
+                );
+            }
+        }
+
         for (int index = 0; index < count; index++) {
             JSONObject project = projects.optJSONObject(index);
             if (project == null) continue;
@@ -653,6 +665,12 @@ public class MainActivity extends Activity {
     }
 
     private void selectProject(String name, String path) {
+        applyProjectSelection(name, path);
+        setProjectSetupStatus("Selected project. Commands now run there.", false);
+        if (loadedProjects.length() > 0) renderProjects(loadedProjects);
+    }
+
+    private void applyProjectSelection(String name, String path) {
         selectedProjectName = name;
         selectedProjectPath = path;
         if (projectTitle != null) projectTitle.setText(name);
