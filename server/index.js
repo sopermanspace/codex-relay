@@ -22,6 +22,17 @@ const port = Number(process.env.PORT || 8787);
 const codexCommand = process.env.CODEX_COMMAND || 'codex';
 const codexWorkdir = process.env.CODEX_WORKDIR || os.homedir();
 const projectRoots = getProjectRoots();
+const ignoredProjectDirs = new Set([
+  '.git',
+  '.gradle',
+  '.next',
+  '.vercel',
+  'artifacts',
+  'build',
+  'dist',
+  'node_modules',
+  'screenshots'
+]);
 const makeToken = customAlphabet('123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz', 32);
 const remoteToken = process.env.REMOTE_TOKEN || makeToken();
 
@@ -286,7 +297,7 @@ function getProjectRoots() {
   const configured = process.env.CODEX_PROJECT_ROOTS
     ? process.env.CODEX_PROJECT_ROOTS.split(path.delimiter)
     : [
-        codexWorkdir,
+        path.dirname(codexWorkdir),
         path.join(os.homedir(), 'Documents'),
         path.join(os.homedir(), 'Desktop')
       ];
@@ -311,7 +322,7 @@ async function listProjects() {
     }
 
     for (const child of children) {
-      if (!child.isDirectory() || child.name.startsWith('.')) continue;
+      if (!child.isDirectory() || child.name.startsWith('.') || ignoredProjectDirs.has(child.name)) continue;
       const fullPath = path.join(root, child.name);
       if (seen.has(fullPath)) continue;
       seen.add(fullPath);
