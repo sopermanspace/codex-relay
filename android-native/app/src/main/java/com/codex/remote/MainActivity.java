@@ -335,8 +335,9 @@ public class MainActivity extends Activity {
                 boolean ok = response.optBoolean("ok", false);
                 String output = response.optString("output", "");
                 if (output.trim().isEmpty()) output = ok ? "Done." : "No output returned.";
-                String title = ok ? "Completed in " + seconds + "s" : "Finished with exit code " + response.optInt("exitCode", -1);
-                runOnUiThread(() -> setResult(title, output, !ok));
+                final String resultTitleText = ok ? "Completed in " + seconds + "s" : "Finished with exit code " + response.optInt("exitCode", -1);
+                final String resultOutputText = output;
+                runOnUiThread(() -> setResult(resultTitleText, resultOutputText, !ok));
             } catch (Exception error) {
                 runOnUiThread(() -> setResult("Connection failed", error.getMessage(), true));
             } finally {
