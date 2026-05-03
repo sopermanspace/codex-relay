@@ -138,7 +138,7 @@ public class MainActivity extends Activity {
         topBar.setOrientation(LinearLayout.HORIZONTAL);
         connectScreen.addView(topBar, matchWrap());
 
-        topBar.addView(new CommandMarkView(this), new LinearLayout.LayoutParams(dp(56), dp(56)));
+        topBar.addView(new CommandMarkView(this), new LinearLayout.LayoutParams(dp(52), dp(52)));
 
         LinearLayout brand = new LinearLayout(this);
         brand.setOrientation(LinearLayout.VERTICAL);
@@ -148,15 +148,15 @@ public class MainActivity extends Activity {
 
         TextView eyebrow = labelCaps("CODEX RELAY");
         brand.addView(eyebrow);
-        TextView title = heroTitle("Mobile command center");
+        TextView title = heroTitle("Codex Relay");
         LinearLayout.LayoutParams titleParams = matchWrap();
         titleParams.topMargin = dp(4);
         brand.addView(title, titleParams);
 
-        TextView live = chip("Native");
-        topBar.addView(live, new LinearLayout.LayoutParams(dp(88), dp(38)));
+        TextView live = chip("APK");
+        topBar.addView(live, new LinearLayout.LayoutParams(dp(68), dp(36)));
 
-        TextView subtitle = body("Connect your Android phone directly to the Codex app-server on your Mac.");
+        TextView subtitle = body("Native Android control for the Codex app-server on your Mac.");
         LinearLayout.LayoutParams subtitleParams = matchWrap();
         subtitleParams.topMargin = dp(22);
         subtitleParams.bottomMargin = dp(18);
@@ -195,11 +195,10 @@ public class MainActivity extends Activity {
 
         LinearLayout systemCard = miniPanel();
         LinearLayout.LayoutParams systemParams = matchWrap();
-        systemParams.topMargin = dp(16);
+        systemParams.topMargin = dp(14);
         connectScreen.addView(systemCard, systemParams);
         systemCard.addView(metricRow("Transport", "HTTP command API"));
-        systemCard.addView(metricRow("Output", "Clean Codex result text"));
-        systemCard.addView(metricRow("Install", "Native Android APK"));
+        systemCard.addView(metricRow("Output", "Clean result text"));
     }
 
     private void buildWorkspaceScreen() {
@@ -567,7 +566,7 @@ public class MainActivity extends Activity {
 
     private TextView heroTitle(String value) {
         TextView text = title(value);
-        text.setTextSize(30);
+        text.setTextSize(28);
         return text;
     }
 
