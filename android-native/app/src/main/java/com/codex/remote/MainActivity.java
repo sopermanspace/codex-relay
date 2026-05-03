@@ -27,6 +27,7 @@ import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -61,6 +62,9 @@ public class MainActivity extends Activity {
     private TextView resultTitle;
     private TextView resultBody;
     private TextView metaLabel;
+    private TextView projectTitle;
+    private TextView projectPathLabel;
+    private LinearLayout projectList;
     private ProgressBar progressBar;
     private Button unlockButton;
     private Button runButton;
@@ -69,6 +73,8 @@ public class MainActivity extends Activity {
     private String serverUrl = "";
     private String token = "";
     private String lastOutput = "";
+    private String selectedProjectPath = "";
+    private String selectedProjectName = "Default workspace";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -229,6 +235,39 @@ public class MainActivity extends Activity {
         statusTextParams.topMargin = dp(12);
         statusCard.addView(statusText, statusTextParams);
 
+        LinearLayout projectsCard = panel();
+        LinearLayout.LayoutParams projectsParams = matchWrap();
+        projectsParams.topMargin = dp(18);
+        workspaceScreen.addView(projectsCard, projectsParams);
+
+        LinearLayout projectsHeader = new LinearLayout(this);
+        projectsHeader.setGravity(Gravity.CENTER_VERTICAL);
+        projectsCard.addView(projectsHeader, matchWrap());
+        TextView projectsLabel = sectionTitle("Projects");
+        projectsHeader.addView(projectsLabel, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        Button refreshProjects = quietButton("Refresh");
+        refreshProjects.setOnClickListener(view -> loadProjects());
+        projectsHeader.addView(refreshProjects, new LinearLayout.LayoutParams(dp(98), dp(42)));
+
+        projectTitle = body("Default workspace");
+        projectTitle.setTextColor(TEXT);
+        projectTitle.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        LinearLayout.LayoutParams projectTitleParams = matchWrap();
+        projectTitleParams.topMargin = dp(14);
+        projectsCard.addView(projectTitle, projectTitleParams);
+
+        projectPathLabel = caption("Commands run in the server workspace until you pick a project.");
+        LinearLayout.LayoutParams projectPathParams = matchWrap();
+        projectPathParams.topMargin = dp(4);
+        projectsCard.addView(projectPathLabel, projectPathParams);
+
+        projectList = new LinearLayout(this);
+        projectList.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams projectListParams = matchWrap();
+        projectListParams.topMargin = dp(12);
+        projectsCard.addView(projectList, projectListParams);
+        renderProjectLoading();
+
         TextView promptLabel = formLabel("Command");
         LinearLayout.LayoutParams promptLabelParams = matchWrap();
         promptLabelParams.topMargin = dp(20);
@@ -341,6 +380,7 @@ public class MainActivity extends Activity {
         connection.setRequestProperty("Authorization", "Bearer " + token);
         JSONObject body = new JSONObject();
         body.put("prompt", prompt);
+        if (!selectedProjectPath.trim().isEmpty()) body.put("cwd", selectedProjectPath);
         byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
         try (OutputStream out = connection.getOutputStream()) {
             out.write(payload);
@@ -370,6 +410,35 @@ public class MainActivity extends Activity {
         if (!response.optBoolean("ok", false)) throw new Exception("Server did not confirm access.");
     }
 
+    private void loadProjects() {
+        if (serverUrl.trim().isEmpty() || token.trim().isEmpty()) return;
+        renderProjectLoading();
+
+        new Thread(() -> {
+            try {
+                JSONArray projects = getProjects();
+                runOnUiThread(() -> renderProjects(projects));
+            } catch (Exception error) {
+                runOnUiThread(() -> renderProjectError(error.getMessage()));
+            }
+        }).start();
+    }
+
+    private JSONArray getProjects() throws Exception {
+        URL url = new URL(serverUrl + "/api/projects");
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(10000);
+        connection.setReadTimeout(20000);
+        connection.setRequestProperty("Authorization", "Bearer " + token);
+        int status = connection.getResponseCode();
+        String response = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
+        if (status == 401) throw new Exception("Token rejected.");
+        if (status < 200 || status >= 300) throw new Exception(response.trim().isEmpty() ? "Server returned " + status + "." : response);
+        JSONObject object = new JSONObject(response);
+        return object.optJSONArray("projects") == null ? new JSONArray() : object.optJSONArray("projects");
+    }
+
     private void showConnect() {
         connectScreen.setVisibility(View.VISIBLE);
         workspaceScreen.setVisibility(View.GONE);
@@ -382,12 +451,15 @@ public class MainActivity extends Activity {
         workspaceScreen.setVisibility(View.VISIBLE);
         progressBar.setVisibility(View.GONE);
         metaLabel.setText(serverUrl.replace("http://", "").replace("https://", ""));
+        if (!getIntent().getBooleanExtra("demo_dashboard", false)) loadProjects();
         setResult("Result", "No command has been sent yet.", false);
     }
 
     private void showDemoDashboard() {
         serverUrl = "http://192.168.18.182:8787";
         showWorkspace();
+        selectProject("New project 5", "/Users/himanshu/Documents/New project 5");
+        renderDemoProjects();
         promptInput.setText("Summarize this repo and list the next three improvements.");
         setResult(
             "Completed in 18s",
@@ -414,6 +486,110 @@ public class MainActivity extends Activity {
         resultBody.setText(body);
         lastOutput = body;
         copyButton.setEnabled(!body.trim().isEmpty() && !"No output yet.".equals(body));
+    }
+
+    private void renderProjectLoading() {
+        if (projectList == null) return;
+        projectList.removeAllViews();
+        projectList.addView(projectRow("Loading projects...", "Reading folders from your Mac", false, null), matchWrap());
+    }
+
+    private void renderProjectError(String message) {
+        if (projectList == null) return;
+        projectList.removeAllViews();
+        projectList.addView(projectRow("Unable to load projects", message, false, null), matchWrap());
+    }
+
+    private void renderProjects(JSONArray projects) {
+        if (projectList == null) return;
+        projectList.removeAllViews();
+        if (projects.length() == 0) {
+            projectList.addView(projectRow("No projects found", "Add folders under Documents, Desktop, or CODEX_PROJECT_ROOTS.", false, null), matchWrap());
+            return;
+        }
+
+        int count = Math.min(projects.length(), 8);
+        for (int index = 0; index < count; index++) {
+            JSONObject project = projects.optJSONObject(index);
+            if (project == null) continue;
+            String name = project.optString("name", "Project");
+            String path = project.optString("path", "");
+            String meta = project.optString("parent", "");
+            JSONArray tags = project.optJSONArray("tags");
+            if (tags != null && tags.length() > 0) {
+                meta = joinTags(tags);
+            }
+            boolean selected = path.equals(selectedProjectPath);
+            View row = projectRow(name, meta, selected, () -> selectProject(name, path));
+            LinearLayout.LayoutParams params = matchWrap();
+            if (index > 0) params.topMargin = dp(8);
+            projectList.addView(row, params);
+        }
+    }
+
+    private void renderDemoProjects() {
+        if (projectList == null) return;
+        projectList.removeAllViews();
+        projectList.addView(projectRow("New project 5", "Git  /  Node  /  Agents", true, () -> selectProject("New project 5", "/Users/himanshu/Documents/New project 5")), matchWrap());
+        LinearLayout.LayoutParams params = matchWrap();
+        params.topMargin = dp(8);
+        projectList.addView(projectRow("Website experiments", "Node  /  Docs", false, () -> selectProject("Website experiments", "/Users/himanshu/Documents/Website experiments")), params);
+    }
+
+    private View projectRow(String name, String detail, boolean selected, Runnable onClick) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(14), dp(12), dp(14), dp(12));
+        row.setBackground(rounded(
+            selected ? Color.rgb(7, 42, 32) : Color.rgb(4, 5, 8),
+            selected ? Color.argb(100, 52, 211, 153) : Color.argb(34, 250, 250, 250),
+            1,
+            18
+        ));
+        if (onClick != null) row.setOnClickListener(view -> onClick.run());
+
+        TextView folderIcon = new TextView(this);
+        folderIcon.setText(selected ? "●" : "○");
+        folderIcon.setTextColor(selected ? ACCENT : SOFT);
+        folderIcon.setTextSize(18);
+        row.addView(folderIcon, new LinearLayout.LayoutParams(dp(28), LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        row.addView(texts, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        TextView title = new TextView(this);
+        title.setText(name);
+        title.setTextColor(TEXT);
+        title.setTextSize(14);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        texts.addView(title);
+
+        TextView subtitle = caption(detail);
+        LinearLayout.LayoutParams subtitleParams = matchWrap();
+        subtitleParams.topMargin = dp(2);
+        texts.addView(subtitle, subtitleParams);
+        return row;
+    }
+
+    private void selectProject(String name, String path) {
+        selectedProjectName = name;
+        selectedProjectPath = path;
+        if (projectTitle != null) projectTitle.setText(name);
+        if (projectPathLabel != null) projectPathLabel.setText(path);
+        if (metaLabel != null) metaLabel.setText(name);
+    }
+
+    private String joinTags(JSONArray tags) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < tags.length(); i++) {
+            String tag = tags.optString(i, "");
+            if (tag.trim().isEmpty()) continue;
+            if (builder.length() > 0) builder.append("  /  ");
+            builder.append(tag);
+        }
+        return builder.toString();
     }
 
     private void copyLastOutput() {

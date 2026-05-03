@@ -1,6 +1,7 @@
 import 'dotenv/config';
 
 import http from 'node:http';
+import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -20,6 +21,7 @@ const host = process.env.HOST || '0.0.0.0';
 const port = Number(process.env.PORT || 8787);
 const codexCommand = process.env.CODEX_COMMAND || 'codex';
 const codexWorkdir = process.env.CODEX_WORKDIR || os.homedir();
+const projectRoots = getProjectRoots();
 const makeToken = customAlphabet('123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz', 32);
 const remoteToken = process.env.REMOTE_TOKEN || makeToken();
 
@@ -69,6 +71,26 @@ app.get('/api/auth', (req, res) => {
     appName: 'Codex Relay',
     workdir: codexWorkdir
   });
+});
+
+app.get('/api/projects', async (req, res) => {
+  const token = getBearerToken(req);
+  if (!isAuthorized(token)) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  try {
+    const projects = await listProjects();
+    res.json({
+      ok: true,
+      workdir: codexWorkdir,
+      roots: projectRoots,
+      projects
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
 });
 
 app.post('/api/session', (req, res) => {
@@ -132,18 +154,24 @@ app.post('/api/command', async (req, res) => {
   }
 
   const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+  const cwd = resolveRequestedCwd(req.body?.cwd);
   if (!prompt) {
     res.status(400).json({ error: 'Prompt is required' });
+    return;
+  }
+  if (!cwd) {
+    res.status(400).json({ error: 'Project folder is outside the allowed roots.' });
     return;
   }
 
   const startedAt = Date.now();
   try {
-    const result = await runCodexExec(prompt);
+    const result = await runCodexExec(prompt, cwd);
     res.json({
       ok: result.exitCode === 0,
       exitCode: result.exitCode,
       output: result.output,
+      cwd,
       durationMs: Date.now() - startedAt
     });
   } catch (error) {
@@ -254,14 +282,108 @@ function getNetworkUrl(selectedPort) {
   return null;
 }
 
-function runCodexExec(prompt) {
+function getProjectRoots() {
+  const configured = process.env.CODEX_PROJECT_ROOTS
+    ? process.env.CODEX_PROJECT_ROOTS.split(path.delimiter)
+    : [
+        codexWorkdir,
+        path.join(os.homedir(), 'Documents'),
+        path.join(os.homedir(), 'Desktop')
+      ];
+
+  return Array.from(new Set(
+    configured
+      .map((item) => path.resolve(item.trim()))
+      .filter(Boolean)
+  ));
+}
+
+async function listProjects() {
+  const entries = [];
+  const seen = new Set();
+
+  for (const root of projectRoots) {
+    let children;
+    try {
+      children = await fs.readdir(root, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const child of children) {
+      if (!child.isDirectory() || child.name.startsWith('.')) continue;
+      const fullPath = path.join(root, child.name);
+      if (seen.has(fullPath)) continue;
+      seen.add(fullPath);
+      const meta = await projectMeta(fullPath);
+      entries.push(meta);
+    }
+  }
+
+  entries.sort((a, b) => b.updatedAt - a.updatedAt || a.name.localeCompare(b.name));
+  return entries.slice(0, Number(process.env.CODEX_MAX_PROJECTS || 80));
+}
+
+async function projectMeta(projectPath) {
+  const stat = await fs.stat(projectPath);
+  const markers = await Promise.all([
+    exists(path.join(projectPath, '.git')),
+    exists(path.join(projectPath, 'package.json')),
+    exists(path.join(projectPath, 'pyproject.toml')),
+    exists(path.join(projectPath, 'README.md')),
+    exists(path.join(projectPath, 'AGENTS.md'))
+  ]);
+
+  const tags = [];
+  if (markers[0]) tags.push('Git');
+  if (markers[1]) tags.push('Node');
+  if (markers[2]) tags.push('Python');
+  if (markers[3]) tags.push('Docs');
+  if (markers[4]) tags.push('Agents');
+
+  return {
+    name: path.basename(projectPath),
+    path: projectPath,
+    parent: path.dirname(projectPath),
+    tags,
+    updatedAt: stat.mtimeMs
+  };
+}
+
+async function exists(targetPath) {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveRequestedCwd(value) {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return path.resolve(codexWorkdir);
+  }
+
+  const resolved = path.resolve(value);
+  if (!isAllowedProjectPath(resolved)) return null;
+  return resolved;
+}
+
+function isAllowedProjectPath(candidate) {
+  return projectRoots.some((root) => {
+    const relative = path.relative(root, candidate);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  });
+}
+
+function runCodexExec(prompt, cwd = codexWorkdir) {
   const args = [
     '-a',
     process.env.CODEX_APPROVAL_POLICY || 'never',
     '--sandbox',
     process.env.CODEX_SANDBOX || 'workspace-write',
     '-C',
-    codexWorkdir,
+    cwd,
     'exec',
     '--color',
     'never',
@@ -271,7 +393,7 @@ function runCodexExec(prompt) {
 
   return new Promise((resolve, reject) => {
     const child = spawn(codexCommand, args, {
-      cwd: codexWorkdir,
+      cwd,
       env: {
         ...process.env,
         TERM: 'dumb',
