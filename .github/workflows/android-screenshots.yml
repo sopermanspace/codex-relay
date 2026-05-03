@@ -39,25 +39,20 @@ jobs:
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -camera-back none
           script: |
             mkdir -p screenshots
-            dismiss_system_dialog() {
-              adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
-              if adb shell cat /sdcard/window.xml 2>/dev/null | grep -q "System UI isn't responding"; then
-                adb shell input tap 360 1060 || true
-                sleep 1
-              fi
-            }
             adb install -r android-native/app/build/outputs/apk/debug/app-debug.apk
             adb shell settings put global window_animation_scale 0
             adb shell settings put global transition_animation_scale 0
             adb shell settings put global animator_duration_scale 0
             adb shell am start -n com.codex.remote/.MainActivity
             sleep 4
-            dismiss_system_dialog
+            adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
+            adb shell cat /sdcard/window.xml 2>/dev/null | grep -q "System UI isn" && adb shell input tap 360 1060 || true
             adb exec-out screencap -p > screenshots/codex-relay-connect.png
             adb shell am force-stop com.codex.remote
             adb shell am start -n com.codex.remote/.MainActivity --ez demo_dashboard true
             sleep 4
-            dismiss_system_dialog
+            adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
+            adb shell cat /sdcard/window.xml 2>/dev/null | grep -q "System UI isn" && adb shell input tap 360 1060 || true
             adb exec-out screencap -p > screenshots/codex-relay-dashboard.png
 
       - name: Upload screenshots
