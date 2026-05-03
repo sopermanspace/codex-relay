@@ -1,5 +1,5 @@
-const CACHE_NAME = 'codex-remote-v8';
-const ASSETS = ['/styles.css?v=8', '/app.js?v=8', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png', '/brand/codex-remote-logo.svg'];
+const CACHE_NAME = 'codex-remote-v9';
+const ASSETS = ['/styles.css?v=9', '/app.js?v=9', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png', '/brand/codex-remote-logo.svg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

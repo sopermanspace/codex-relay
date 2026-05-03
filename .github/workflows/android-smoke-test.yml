@@ -1,0 +1,140 @@
+name: Android App Smoke Test
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "android-native/**"
+      - "server/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/android-smoke-test.yml"
+
+jobs:
+  smoke-test:
+    name: Connect native app to local server
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      REMOTE_TOKEN: SmokeTokenSmokeTokenSmokeToken123456
+      PORT: 8787
+      HOST: 0.0.0.0
+      CODEX_COMMAND: node
+      CODEX_WORKDIR: ${{ github.workspace }}
+      CODEX_PROJECT_ROOTS: ${{ github.workspace }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install server dependencies
+        run: npm ci
+
+      - name: Start app-server
+        run: |
+          npm start > server.log 2>&1 &
+          for i in {1..30}; do
+            curl -fsS http://localhost:8787/health && exit 0
+            sleep 1
+          done
+          cat server.log
+          exit 1
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Build debug APK
+        working-directory: android-native
+        run: gradle assembleDebug
+
+      - name: Install and connect app
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          target: default
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -camera-back none
+          script: |
+            set -euo pipefail
+            mkdir -p smoke-screenshots
+            adb install -r android-native/app/build/outputs/apk/debug/app-debug.apk
+            adb shell settings put global window_animation_scale 0
+            adb shell settings put global transition_animation_scale 0
+            adb shell settings put global animator_duration_scale 0
+            adb shell am start -n com.codex.remote/.MainActivity
+            sleep 3
+
+            adb shell uiautomator dump /sdcard/window.xml >/dev/null
+            adb shell cat /sdcard/window.xml > window-connect.xml
+            python3 <<'PY'
+            import re
+            import subprocess
+            import xml.etree.ElementTree as ET
+
+            xml = ET.parse("window-connect.xml")
+            edits = []
+            connect = None
+            for node in xml.iter("node"):
+              bounds = node.attrib.get("bounds", "")
+              match = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
+              if not match:
+                continue
+              x1, y1, x2, y2 = map(int, match.groups())
+              center = ((x1 + x2) // 2, (y1 + y2) // 2)
+              if node.attrib.get("class") == "android.widget.EditText":
+                edits.append(center)
+              if node.attrib.get("text") == "Connect to Codex":
+                connect = center
+
+            if len(edits) < 2 or connect is None:
+              raise SystemExit("Connection form controls were not found")
+
+            def adb(*args):
+              subprocess.run(["adb", *args], check=True)
+
+            server, token = edits[0], edits[1]
+            adb("shell", "input", "tap", str(server[0]), str(server[1]))
+            adb("shell", "input", "keyevent", "KEYCODE_MOVE_END")
+            for _ in range(80):
+              adb("shell", "input", "keyevent", "KEYCODE_DEL")
+            adb("shell", "input", "text", "http://10.0.2.2:8787")
+
+            adb("shell", "input", "tap", str(token[0]), str(token[1]))
+            adb("shell", "input", "text", "SmokeTokenSmokeTokenSmokeToken123456")
+
+            adb("shell", "input", "tap", str(connect[0]), str(connect[1]))
+            PY
+
+            sleep 7
+            adb shell uiautomator dump /sdcard/window.xml >/dev/null
+            adb shell cat /sdcard/window.xml > window-dashboard.xml
+            adb exec-out screencap -p > smoke-screenshots/android-smoke-dashboard.png
+            grep -Eq "Project Sidebar|Security|Slash commands" window-dashboard.xml
+
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-smoke-test-artifacts
+          path: |
+            server.log
+            window-*.xml
+            smoke-screenshots/*.png
+          if-no-files-found: ignore

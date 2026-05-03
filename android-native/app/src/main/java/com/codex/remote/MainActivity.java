@@ -218,23 +218,12 @@ public class MainActivity extends Activity {
         eyebrowParams.topMargin = dp(26);
         connectScreen.addView(eyebrow, eyebrowParams);
 
-        TextView title = heroTitle("Codex Relay");
-        title.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams titleParams = matchWrap();
-        titleParams.topMargin = dp(8);
-        connectScreen.addView(title, titleParams);
-
         TextView subtitle = body("Native Android control for the Codex app-server on your Mac.");
         subtitle.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams subtitleParams = matchWrap();
-        subtitleParams.topMargin = dp(12);
-        subtitleParams.bottomMargin = dp(28);
+        subtitleParams.topMargin = dp(14);
+        subtitleParams.bottomMargin = dp(32);
         connectScreen.addView(subtitle, subtitleParams);
-
-        TextView traits = quietCaps("NATIVE ANDROID  /  PRIVATE RELAY  /  DIRECT API");
-        LinearLayout.LayoutParams traitsParams = centerWrap();
-        traitsParams.bottomMargin = dp(22);
-        connectScreen.addView(traits, traitsParams);
 
         accessModeHint = caption("Use your home Wi-Fi URL here. If you are away, use your secure link.");
         accessModeHint.setGravity(Gravity.CENTER);
@@ -437,7 +426,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams mentionParams = matchWrap();
         mentionParams.topMargin = dp(12);
         workspaceScreen.addView(mentionCard, mentionParams);
-        mentionCard.addView(sectionTitle("File mentions"), matchWrap());
+        mentionCard.addView(sectionTitle("@ Plugins and files"), matchWrap());
         mentionList = new LinearLayout(this);
         mentionList.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams mentionListParams = matchWrap();
@@ -841,7 +830,7 @@ public class MainActivity extends Activity {
     private void renderMentionLoading() {
         if (mentionList == null) return;
         mentionList.removeAllViews();
-        mentionList.addView(caption("Loading project files..."), matchWrap());
+        mentionList.addView(caption("Loading plugins and files..."), matchWrap());
     }
 
     private void renderMentionError(String message) {
@@ -856,14 +845,14 @@ public class MainActivity extends Activity {
         mentionList.removeAllViews();
         int count = Math.min(mentions.length(), 10);
         if (count == 0) {
-            mentionList.addView(caption("No mentionable files found."), matchWrap());
+            mentionList.addView(caption("No plugins or files found."), matchWrap());
             return;
         }
         for (int index = 0; index < count; index++) {
             JSONObject mention = mentions.optJSONObject(index);
             if (mention == null) continue;
             String label = mention.optString("label", "");
-            String detail = mention.optString("detail", "Project file");
+            String detail = mention.optString("detail", "Mention");
             View row = mentionRow(label, detail);
             LinearLayout.LayoutParams params = matchWrap();
             if (index > 0) params.topMargin = dp(8);
@@ -986,9 +975,12 @@ public class MainActivity extends Activity {
 
     private JSONArray defaultMentions() {
         JSONArray mentions = new JSONArray();
-        addMention(mentions, "@README.md", "Project root");
-        addMention(mentions, "@AGENTS.md", "Project root");
-        addMention(mentions, "@package.json", "Project root");
+        addMention(mentions, "@vercel", "Codex plugin");
+        addMention(mentions, "@github", "Codex plugin");
+        addMention(mentions, "@browser-use", "Bundled plugin");
+        addMention(mentions, "@README.md", "Project file");
+        addMention(mentions, "@AGENTS.md", "Project file");
+        addMention(mentions, "@package.json", "Project file");
         return mentions;
     }
 
@@ -1245,38 +1237,11 @@ public class MainActivity extends Activity {
         return text;
     }
 
-    private TextView quietCaps(String value) {
-        TextView text = new TextView(this);
-        text.setText(value);
-        text.setTextColor(Color.rgb(126, 132, 142));
-        text.setTextSize(11);
-        text.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        text.setLetterSpacing(0.05f);
-        text.setGravity(Gravity.CENTER);
-        return text;
-    }
-
     private TextView formLabel(String value) {
         TextView text = caption(value);
         LinearLayout.LayoutParams params = matchWrap();
         params.topMargin = dp(14);
         text.setLayoutParams(params);
-        return text;
-    }
-
-    private TextView title(String value) {
-        TextView text = new TextView(this);
-        text.setText(value);
-        text.setTextColor(TEXT);
-        text.setTextSize(34);
-        text.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        text.setIncludeFontPadding(false);
-        return text;
-    }
-
-    private TextView heroTitle(String value) {
-        TextView text = title(value);
-        text.setTextSize(38);
         return text;
     }
 

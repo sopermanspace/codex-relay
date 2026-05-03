@@ -673,6 +673,58 @@ async function projectMeta(projectPath) {
 }
 
 async function listMentions(cwd, query = '') {
+  const [plugins, files] = await Promise.all([
+    listPluginMentions(query),
+    listFileMentions(cwd, query)
+  ]);
+  return [...plugins, ...files];
+}
+
+async function listPluginMentions(query = '') {
+  const normalizedQuery = query.toLowerCase();
+  const roots = [
+    path.join(os.homedir(), '.codex', 'plugins', 'cache', 'openai-curated'),
+    path.join(os.homedir(), '.codex', 'plugins', 'cache', 'openai-primary-runtime'),
+    path.join(os.homedir(), '.codex', 'plugins', 'cache', 'openai-bundled')
+  ];
+  const mentions = [];
+  const seen = new Set();
+
+  for (const root of roots) {
+    let entries;
+    try {
+      entries = await fs.readdir(root, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      const label = `@${entry.name}`;
+      if (seen.has(label)) continue;
+      if (normalizedQuery && !entry.name.toLowerCase().includes(normalizedQuery)) continue;
+      seen.add(label);
+      mentions.push({
+        label,
+        path: entry.name,
+        detail: pluginSourceLabel(root),
+        type: 'plugin'
+      });
+    }
+  }
+
+  mentions.sort((a, b) => a.label.localeCompare(b.label));
+  return mentions;
+}
+
+function pluginSourceLabel(root) {
+  if (root.includes('openai-curated')) return 'Codex plugin';
+  if (root.includes('openai-primary-runtime')) return 'Runtime plugin';
+  if (root.includes('openai-bundled')) return 'Bundled plugin';
+  return 'Plugin';
+}
+
+async function listFileMentions(cwd, query = '') {
   const root = path.resolve(cwd);
   const normalizedQuery = query.toLowerCase();
   const results = [];
@@ -710,7 +762,8 @@ async function listMentions(cwd, query = '') {
       results.push({
         label: `@${relativePath}`,
         path: relativePath,
-        detail: path.dirname(relativePath) === '.' ? 'Project root' : path.dirname(relativePath)
+        detail: path.dirname(relativePath) === '.' ? 'Project file' : path.dirname(relativePath),
+        type: 'file'
       });
     }
   }

@@ -279,7 +279,7 @@ function updatePalette() {
 
   loadMentions(trigger.query).then(() => {
     const matches = mentionItems.filter((item) => item.path.toLowerCase().includes(trigger.query));
-    paletteTitle.textContent = 'File mentions';
+    paletteTitle.textContent = '@ plugins and files';
     renderPalette(matches.map((item) => ({
       label: item.label,
       detail: item.detail,
