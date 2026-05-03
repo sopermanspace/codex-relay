@@ -72,7 +72,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -camera-back none
           script: |
-            set -euo pipefail
+            set -eu
             mkdir -p smoke-screenshots
             adb install -r android-native/app/build/outputs/apk/debug/app-debug.apk
             adb shell settings put global window_animation_scale 0
