@@ -22,7 +22,9 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
@@ -77,10 +79,17 @@ public class MainActivity extends Activity {
     private TextView chatContextLabel;
     private TextView accessModeHint;
     private TextView securityStatus;
+    private TextView chatTitle;
+    private TextView composerStatus;
     private EditText projectNameInput;
     private LinearLayout projectList;
     private LinearLayout slashCommandList;
     private LinearLayout mentionList;
+    private LinearLayout chatList;
+    private LinearLayout projectPanel;
+    private LinearLayout securityPanel;
+    private LinearLayout suggestionPanel;
+    private LinearLayout suggestionList;
     private ProgressBar progressBar;
     private Button unlockButton;
     private Button runButton;
@@ -266,59 +275,115 @@ public class MainActivity extends Activity {
         workspaceScreen.addView(header, matchWrap());
 
         CommandMarkView appMark = new CommandMarkView(this);
-        LinearLayout.LayoutParams markParams = new LinearLayout.LayoutParams(dp(48), dp(48));
+        LinearLayout.LayoutParams markParams = new LinearLayout.LayoutParams(dp(44), dp(44));
         markParams.rightMargin = dp(12);
         header.addView(appMark, markParams);
 
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);
         header.addView(titles, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        titles.addView(sectionTitle("Codex Relay"));
-        metaLabel = caption("Connected");
+        chatTitle = sectionTitle("Codex Relay");
+        titles.addView(chatTitle);
+        metaLabel = caption("Choose a project");
         titles.addView(metaLabel);
+
+        Button projectsButton = quietButton("Projects");
+        projectsButton.setOnClickListener(view -> togglePanel(projectPanel));
+        LinearLayout.LayoutParams projectsButtonParams = new LinearLayout.LayoutParams(dp(96), dp(44));
+        projectsButtonParams.rightMargin = dp(8);
+        header.addView(projectsButton, projectsButtonParams);
 
         Button close = quietButton("Lock");
         close.setOnClickListener(view -> showConnect());
-        header.addView(close, new LinearLayout.LayoutParams(dp(92), dp(48)));
+        header.addView(close, new LinearLayout.LayoutParams(dp(74), dp(44)));
 
-        LinearLayout statusCard = miniPanel();
-        LinearLayout.LayoutParams statusCardParams = matchWrap();
-        statusCardParams.topMargin = dp(18);
-        workspaceScreen.addView(statusCard, statusCardParams);
+        LinearLayout chatMeta = new LinearLayout(this);
+        chatMeta.setOrientation(LinearLayout.HORIZONTAL);
+        chatMeta.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams chatMetaParams = matchWrap();
+        chatMetaParams.topMargin = dp(16);
+        workspaceScreen.addView(chatMeta, chatMetaParams);
 
-        LinearLayout statusRow = new LinearLayout(this);
-        statusRow.setGravity(Gravity.CENTER_VERTICAL);
-        statusRow.setOrientation(LinearLayout.HORIZONTAL);
-        statusCard.addView(statusRow, matchWrap());
         statusPill = chip("Online");
-        statusRow.addView(statusPill, new LinearLayout.LayoutParams(dp(92), dp(36)));
-        TextView mode = caption("Direct command API");
-        LinearLayout.LayoutParams modeParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
-        modeParams.leftMargin = dp(12);
-        statusRow.addView(mode, modeParams);
-        TextView statusText = body("Choose a project, start a chat, then send focused Codex tasks to your Mac.");
-        LinearLayout.LayoutParams statusTextParams = matchWrap();
-        statusTextParams.topMargin = dp(12);
-        statusCard.addView(statusText, statusTextParams);
-
+        chatMeta.addView(statusPill, new LinearLayout.LayoutParams(dp(88), dp(34)));
         chatContextLabel = caption("Chat 1 · No project selected");
-        LinearLayout.LayoutParams chatContextParams = matchWrap();
-        chatContextParams.topMargin = dp(10);
-        statusCard.addView(chatContextLabel, chatContextParams);
+        LinearLayout.LayoutParams contextParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        contextParams.leftMargin = dp(12);
+        chatMeta.addView(chatContextLabel, contextParams);
 
-        LinearLayout securityCard = miniPanel();
+        Button newChat = quietButton("New chat");
+        newChat.setOnClickListener(view -> startNewChat());
+        chatMeta.addView(newChat, new LinearLayout.LayoutParams(dp(96), dp(40)));
+
+        projectPanel = panel();
+        projectPanel.setVisibility(View.GONE);
+        LinearLayout.LayoutParams projectsParams = matchWrap();
+        projectsParams.topMargin = dp(16);
+        workspaceScreen.addView(projectPanel, projectsParams);
+
+        LinearLayout projectsHeader = new LinearLayout(this);
+        projectsHeader.setGravity(Gravity.CENTER_VERTICAL);
+        projectPanel.addView(projectsHeader, matchWrap());
+        TextView projectsLabel = sectionTitle("Projects");
+        projectsHeader.addView(projectsLabel, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        Button refreshProjects = quietButton("Sync");
+        refreshProjects.setOnClickListener(view -> loadProjects());
+        projectsHeader.addView(refreshProjects, new LinearLayout.LayoutParams(dp(72), dp(42)));
+
+        projectTitle = body("Default workspace");
+        projectTitle.setTextColor(TEXT);
+        projectTitle.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        LinearLayout.LayoutParams projectTitleParams = matchWrap();
+        projectTitleParams.topMargin = dp(14);
+        projectPanel.addView(projectTitle, projectTitleParams);
+
+        projectPathLabel = caption("Pick where Codex should work.");
+        LinearLayout.LayoutParams projectPathParams = matchWrap();
+        projectPathParams.topMargin = dp(4);
+        projectPanel.addView(projectPathLabel, projectPathParams);
+
+        LinearLayout setupRow = new LinearLayout(this);
+        setupRow.setOrientation(LinearLayout.HORIZONTAL);
+        setupRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams setupParams = matchWrap();
+        setupParams.topMargin = dp(14);
+        projectPanel.addView(setupRow, setupParams);
+
+        projectNameInput = input("", false, "New project name");
+        setupRow.addView(projectNameInput, new LinearLayout.LayoutParams(0, dp(52), 1));
+
+        Button createProject = quietButton("Create");
+        createProject.setOnClickListener(view -> createProjectFromInput());
+        LinearLayout.LayoutParams createParams = new LinearLayout.LayoutParams(dp(92), dp(52));
+        createParams.leftMargin = dp(10);
+        setupRow.addView(createProject, createParams);
+
+        projectSetupStatus = caption("Create or choose a project for this chat.");
+        LinearLayout.LayoutParams setupStatusParams = matchWrap();
+        setupStatusParams.topMargin = dp(8);
+        projectPanel.addView(projectSetupStatus, setupStatusParams);
+
+        projectList = new LinearLayout(this);
+        projectList.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams projectListParams = matchWrap();
+        projectListParams.topMargin = dp(12);
+        projectPanel.addView(projectList, projectListParams);
+        renderProjectLoading();
+
+        securityPanel = miniPanel();
+        securityPanel.setVisibility(View.GONE);
         LinearLayout.LayoutParams securityParams = matchWrap();
-        securityParams.topMargin = dp(14);
-        workspaceScreen.addView(securityCard, securityParams);
-
-        securityCard.addView(sectionTitle("Security"), matchWrap());
+        securityParams.topMargin = dp(12);
+        workspaceScreen.addView(securityPanel, securityParams);
+        securityPanel.addView(sectionTitle("Security"), matchWrap());
 
         LinearLayout securityButtons = new LinearLayout(this);
         securityButtons.setOrientation(LinearLayout.HORIZONTAL);
         securityButtons.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams securityButtonsParams = matchWrap();
         securityButtonsParams.topMargin = dp(12);
-        securityCard.addView(securityButtons, securityButtonsParams);
+        securityPanel.addView(securityButtons, securityButtonsParams);
 
         autoSecurityButton = quietButton("Auto");
         autoSecurityButton.setOnClickListener(view -> setAccessMode("auto"));
@@ -335,130 +400,76 @@ public class MainActivity extends Activity {
         securityStatus = caption("Auto works at home and with your secure link.");
         LinearLayout.LayoutParams securityStatusParams = matchWrap();
         securityStatusParams.topMargin = dp(10);
-        securityCard.addView(securityStatus, securityStatusParams);
+        securityPanel.addView(securityStatus, securityStatusParams);
         updateAccessModeUi();
 
-        LinearLayout projectsCard = panel();
-        LinearLayout.LayoutParams projectsParams = matchWrap();
-        projectsParams.topMargin = dp(18);
-        workspaceScreen.addView(projectsCard, projectsParams);
+        LinearLayout chatSurface = panel();
+        LinearLayout.LayoutParams chatSurfaceParams = matchWrap();
+        chatSurfaceParams.topMargin = dp(18);
+        workspaceScreen.addView(chatSurface, chatSurfaceParams);
 
-        LinearLayout projectsHeader = new LinearLayout(this);
-        projectsHeader.setGravity(Gravity.CENTER_VERTICAL);
-        projectsCard.addView(projectsHeader, matchWrap());
-        TextView projectsLabel = sectionTitle("Project Sidebar");
-        projectsHeader.addView(projectsLabel, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        chatList = new LinearLayout(this);
+        chatList.setOrientation(LinearLayout.VERTICAL);
+        chatSurface.addView(chatList, matchWrap());
+        resetChatEmpty();
 
-        Button refreshProjects = quietButton("Sync");
-        refreshProjects.setOnClickListener(view -> loadProjects());
-        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(dp(72), dp(42));
-        refreshParams.rightMargin = dp(8);
-        projectsHeader.addView(refreshProjects, refreshParams);
+        suggestionPanel = miniPanel();
+        suggestionPanel.setVisibility(View.GONE);
+        LinearLayout.LayoutParams suggestionParams = matchWrap();
+        suggestionParams.topMargin = dp(12);
+        workspaceScreen.addView(suggestionPanel, suggestionParams);
+        suggestionList = new LinearLayout(this);
+        suggestionList.setOrientation(LinearLayout.VERTICAL);
+        suggestionPanel.addView(suggestionList, matchWrap());
 
-        Button newChat = quietButton("New Chat");
-        newChat.setOnClickListener(view -> startNewChat());
-        projectsHeader.addView(newChat, new LinearLayout.LayoutParams(dp(108), dp(42)));
+        LinearLayout composer = miniPanel();
+        LinearLayout.LayoutParams composerParams = matchWrap();
+        composerParams.topMargin = dp(14);
+        workspaceScreen.addView(composer, composerParams);
 
-        projectTitle = body("Default workspace");
-        projectTitle.setTextColor(TEXT);
-        projectTitle.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        LinearLayout.LayoutParams projectTitleParams = matchWrap();
-        projectTitleParams.topMargin = dp(14);
-        projectsCard.addView(projectTitle, projectTitleParams);
-
-        projectPathLabel = caption("Commands run in the server workspace until you pick a project.");
-        LinearLayout.LayoutParams projectPathParams = matchWrap();
-        projectPathParams.topMargin = dp(4);
-        projectsCard.addView(projectPathLabel, projectPathParams);
-
-        LinearLayout setupRow = new LinearLayout(this);
-        setupRow.setOrientation(LinearLayout.HORIZONTAL);
-        setupRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams setupParams = matchWrap();
-        setupParams.topMargin = dp(14);
-        projectsCard.addView(setupRow, setupParams);
-
-        projectNameInput = input("", false, "New project name");
-        setupRow.addView(projectNameInput, new LinearLayout.LayoutParams(0, dp(52), 1));
-
-        Button createProject = quietButton("Create");
-        createProject.setOnClickListener(view -> createProjectFromInput());
-        LinearLayout.LayoutParams createParams = new LinearLayout.LayoutParams(dp(92), dp(52));
-        createParams.leftMargin = dp(10);
-        setupRow.addView(createProject, createParams);
-
-        projectSetupStatus = caption("Create a folder, then run Codex inside it.");
-        LinearLayout.LayoutParams setupStatusParams = matchWrap();
-        setupStatusParams.topMargin = dp(8);
-        projectsCard.addView(projectSetupStatus, setupStatusParams);
-
-        projectList = new LinearLayout(this);
-        projectList.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams projectListParams = matchWrap();
-        projectListParams.topMargin = dp(12);
-        projectsCard.addView(projectList, projectListParams);
-        renderProjectLoading();
-
-        TextView promptLabel = formLabel("Command");
-        LinearLayout.LayoutParams promptLabelParams = matchWrap();
-        promptLabelParams.topMargin = dp(20);
-        workspaceScreen.addView(promptLabel, promptLabelParams);
-
-        promptInput = input("", false, "Ask Codex to inspect, edit, summarize, or run a task.");
+        promptInput = input("", false, "Message Codex...");
         promptInput.setSingleLine(false);
-        promptInput.setMinLines(4);
+        promptInput.setMinLines(3);
         promptInput.setGravity(Gravity.TOP | Gravity.START);
-        workspaceScreen.addView(promptInput, tallFieldParams());
+        promptInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { updateSuggestions(s.toString()); }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+        composer.addView(promptInput, compactComposerParams());
 
-        LinearLayout slashCard = miniPanel();
-        LinearLayout.LayoutParams slashParams = matchWrap();
-        slashParams.topMargin = dp(12);
-        workspaceScreen.addView(slashCard, slashParams);
-        slashCard.addView(sectionTitle("Slash commands"), matchWrap());
-        slashCommandList = new LinearLayout(this);
-        slashCommandList.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams slashListParams = matchWrap();
-        slashListParams.topMargin = dp(10);
-        slashCard.addView(slashCommandList, slashListParams);
-        renderSlashCommandLoading();
+        LinearLayout composerActions = new LinearLayout(this);
+        composerActions.setOrientation(LinearLayout.HORIZONTAL);
+        composerActions.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams composerActionsParams = matchWrap();
+        composerActionsParams.topMargin = dp(12);
+        composer.addView(composerActions, composerActionsParams);
 
-        LinearLayout mentionCard = miniPanel();
-        LinearLayout.LayoutParams mentionParams = matchWrap();
-        mentionParams.topMargin = dp(12);
-        workspaceScreen.addView(mentionCard, mentionParams);
-        mentionCard.addView(sectionTitle("@ Plugins and files"), matchWrap());
-        mentionList = new LinearLayout(this);
-        mentionList.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams mentionListParams = matchWrap();
-        mentionListParams.topMargin = dp(10);
-        mentionCard.addView(mentionList, mentionListParams);
-        renderMentionLoading();
+        Button settingsButton = quietButton("Security");
+        settingsButton.setOnClickListener(view -> togglePanel(securityPanel));
+        LinearLayout.LayoutParams settingsParams = new LinearLayout.LayoutParams(dp(96), dp(48));
+        settingsParams.rightMargin = dp(10);
+        composerActions.addView(settingsButton, settingsParams);
 
-        runButton = primaryButton("Send command");
+        composerStatus = caption("Type / for commands or @ for files.");
+        composerActions.addView(composerStatus, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        runButton = primaryButton("Send");
         runButton.setOnClickListener(view -> runCommand());
-        LinearLayout.LayoutParams runParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58));
-        runParams.topMargin = dp(14);
-        workspaceScreen.addView(runButton, runParams);
+        composerActions.addView(runButton, new LinearLayout.LayoutParams(dp(92), dp(48)));
 
-        LinearLayout resultCard = panel();
-        LinearLayout.LayoutParams resultParams = matchWrap();
-        resultParams.topMargin = dp(20);
-        workspaceScreen.addView(resultCard, resultParams);
-
-        LinearLayout resultHeader = new LinearLayout(this);
-        resultHeader.setGravity(Gravity.CENTER_VERTICAL);
-        resultCard.addView(resultHeader, matchWrap());
-        resultTitle = sectionTitle("Result");
-        resultHeader.addView(resultTitle, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        copyButton = quietButton("Copy");
+        copyButton = quietButton("Copy last");
+        copyButton.setVisibility(View.GONE);
         copyButton.setEnabled(false);
         copyButton.setOnClickListener(view -> copyLastOutput());
-        resultHeader.addView(copyButton, new LinearLayout.LayoutParams(dp(86), dp(42)));
+        workspaceScreen.addView(copyButton, new LinearLayout.LayoutParams(1, 1));
 
-        resultBody = mono("No command has been sent yet.");
-        LinearLayout.LayoutParams bodyParams = matchWrap();
-        bodyParams.topMargin = dp(14);
-        resultCard.addView(resultBody, bodyParams);
+        resultTitle = sectionTitle("Result");
+        resultTitle.setVisibility(View.GONE);
+        workspaceScreen.addView(resultTitle, new LinearLayout.LayoutParams(1, 1));
+        resultBody = mono("");
+        resultBody.setVisibility(View.GONE);
+        workspaceScreen.addView(resultBody, new LinearLayout.LayoutParams(1, 1));
     }
 
     private void connect() {
@@ -502,12 +513,15 @@ public class MainActivity extends Activity {
     private void runCommand() {
         String prompt = promptInput.getText().toString().trim();
         if (prompt.isEmpty()) {
-            setResult("Task required", "Write a task for Codex first.", true);
+            composerStatus.setText("Write a message first.");
+            composerStatus.setTextColor(ERROR);
             return;
         }
 
         setBusy(true);
-        setResult("Running", "Codex is working on your Mac...", false);
+        addMessageBubble(prompt, true, false);
+        promptInput.setText("");
+        addMessageBubble("Working on it...", false, false);
 
         new Thread(() -> {
             long started = System.currentTimeMillis();
@@ -520,11 +534,15 @@ public class MainActivity extends Activity {
                 final String resultTitleText = ok ? "Completed in " + seconds + "s" : "Finished with exit code " + response.optInt("exitCode", -1);
                 final String resultOutputText = output;
                 runOnUiThread(() -> {
+                    removeLastAssistantPlaceholder();
+                    addMessageBubble(resultOutputText, false, !ok);
                     setResult(resultTitleText, resultOutputText, !ok);
                     notifyTaskDone(resultTitleText, ok ? "Codex finished on your Mac." : "Codex needs attention.");
                 });
             } catch (Exception error) {
                 runOnUiThread(() -> {
+                    removeLastAssistantPlaceholder();
+                    addMessageBubble(error.getMessage(), false, true);
                     setResult("Connection failed", error.getMessage(), true);
                     notifyTaskDone("Codex command failed", error.getMessage());
                 });
@@ -665,11 +683,11 @@ public class MainActivity extends Activity {
         connectScreen.setVisibility(View.GONE);
         workspaceScreen.setVisibility(View.VISIBLE);
         progressBar.setVisibility(View.GONE);
-        metaLabel.setText(serverUrl.replace("http://", "").replace("https://", ""));
+        metaLabel.setText(selectedProjectName);
         if (!getIntent().getBooleanExtra("demo_dashboard", false)) loadProjects();
         loadSlashCommands();
         loadMentions();
-        setResult("Result", "No command has been sent yet.", false);
+        resetChatEmpty();
     }
 
     private void showDemoDashboard() {
@@ -680,18 +698,20 @@ public class MainActivity extends Activity {
         renderMentions(defaultMentions());
         promptInput.setText("Summarize this repo and list the next three improvements.");
         renderSlashCommands(defaultSlashCommands());
-        setResult(
-            "Completed in 18s",
-            "1. App-server command API is live.\n2. Android dashboard renders clean output.\n3. Next: signed release build.",
-            false
-        );
+        resetChatEmpty();
+        addMessageBubble("Summarize this repo and list the next three improvements.", true, false);
+        addMessageBubble("1. App-server command API is live.\n2. Android chat surface is ready.\n3. Next: test the APK on your phone.", false, false);
     }
 
     private void setBusy(boolean busy) {
         progressBar.setVisibility(busy ? View.VISIBLE : View.GONE);
         runButton.setEnabled(!busy);
-        runButton.setText(busy ? "Running..." : "Send command");
+        runButton.setText(busy ? "..." : "Send");
         statusPill.setText(busy ? "Running" : "Online");
+        if (composerStatus != null) {
+            composerStatus.setText(busy ? "Codex is responding..." : "Type / for commands or @ for files.");
+            composerStatus.setTextColor(SOFT);
+        }
     }
 
     private void setConnectStatus(String message, boolean error) {
@@ -756,10 +776,147 @@ public class MainActivity extends Activity {
     private void startNewChat() {
         chatNumber += 1;
         promptInput.setText("");
-        setResult("New chat", "No command has been sent yet.", false);
+        resetChatEmpty();
         setBusy(false);
         updateChatContext();
         setProjectSetupStatus("New chat started in " + selectedProjectName + ".", false);
+    }
+
+    private void togglePanel(View panel) {
+        if (panel == null) return;
+        panel.setVisibility(panel.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+    }
+
+    private void resetChatEmpty() {
+        if (chatList == null) return;
+        chatList.removeAllViews();
+        addMessageBubble("Choose a project, then message Codex like you would in ChatGPT. I will run the task on your Mac.", false, false);
+        lastOutput = "";
+    }
+
+    private void addMessageBubble(String message, boolean user, boolean error) {
+        if (chatList == null) return;
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(user ? Gravity.END : Gravity.START);
+
+        TextView bubble = user ? chatBubble(message, true, false) : chatBubble(message, false, error);
+        LinearLayout.LayoutParams bubbleParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        bubbleParams.topMargin = dp(chatList.getChildCount() == 0 ? 0 : 12);
+        row.addView(bubble, bubbleParams);
+        chatList.addView(row, matchWrap());
+    }
+
+    private void removeLastAssistantPlaceholder() {
+        if (chatList == null || chatList.getChildCount() == 0) return;
+        int lastIndex = chatList.getChildCount() - 1;
+        View rowView = chatList.getChildAt(lastIndex);
+        if (!(rowView instanceof LinearLayout)) return;
+        LinearLayout row = (LinearLayout) rowView;
+        if (row.getGravity() == Gravity.START) {
+            chatList.removeViewAt(lastIndex);
+        }
+    }
+
+    private TextView chatBubble(String message, boolean user, boolean error) {
+        TextView bubble = new TextView(this);
+        bubble.setText(message);
+        bubble.setTextColor(error ? ERROR : (user ? Color.rgb(3, 4, 7) : TEXT));
+        bubble.setTextSize(15);
+        bubble.setLineSpacing(dp(3), 1f);
+        bubble.setPadding(dp(16), dp(13), dp(16), dp(13));
+        bubble.setMaxWidth(getResources().getDisplayMetrics().widthPixels - dp(92));
+        bubble.setBackground(rounded(
+            user ? ACCENT : Color.rgb(14, 16, 21),
+            user ? Color.argb(150, 167, 243, 208) : Color.argb(42, 250, 250, 250),
+            1,
+            22
+        ));
+        if (!user) bubble.setTypeface(Typeface.DEFAULT);
+        return bubble;
+    }
+
+    private void updateSuggestions(String value) {
+        if (suggestionPanel == null || suggestionList == null) return;
+        String trimmed = value.trim();
+        suggestionList.removeAllViews();
+
+        if (trimmed.startsWith("/")) {
+            renderSuggestionHeader("Commands");
+            int count = 0;
+            for (int index = 0; index < loadedSlashCommands.length() && count < 8; index++) {
+                JSONObject command = loadedSlashCommands.optJSONObject(index);
+                if (command == null) continue;
+                String name = command.optString("name", "");
+                if (!name.startsWith(trimmed)) continue;
+                String detail = command.optString("description", "Codex command");
+                addSuggestionRow(name, detail);
+                count++;
+            }
+            suggestionPanel.setVisibility(count > 0 ? View.VISIBLE : View.GONE);
+            return;
+        }
+
+        int atIndex = trimmed.lastIndexOf("@");
+        if (atIndex >= 0) {
+            String query = trimmed.substring(atIndex).toLowerCase();
+            renderSuggestionHeader("Files and plugins");
+            int count = 0;
+            for (int index = 0; index < loadedMentions.length() && count < 8; index++) {
+                JSONObject mention = loadedMentions.optJSONObject(index);
+                if (mention == null) continue;
+                String label = mention.optString("label", "");
+                if (!label.toLowerCase().startsWith(query)) continue;
+                String detail = mention.optString("detail", "Mention");
+                addSuggestionRow(label, detail);
+                count++;
+            }
+            suggestionPanel.setVisibility(count > 0 ? View.VISIBLE : View.GONE);
+            return;
+        }
+
+        suggestionPanel.setVisibility(View.GONE);
+    }
+
+    private void renderSuggestionHeader(String title) {
+        TextView header = caption(title);
+        header.setTextColor(MUTED);
+        header.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        suggestionList.addView(header, matchWrap());
+    }
+
+    private void addSuggestionRow(String label, String detail) {
+        View row = suggestionRow(label, detail);
+        LinearLayout.LayoutParams params = matchWrap();
+        params.topMargin = dp(8);
+        suggestionList.addView(row, params);
+    }
+
+    private View suggestionRow(String label, String detail) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(14), dp(12), dp(14), dp(12));
+        row.setBackground(rounded(Color.rgb(5, 7, 10), Color.argb(38, 250, 250, 250), 1, 18));
+        row.setOnClickListener(view -> {
+            appendPromptToken(label);
+            suggestionPanel.setVisibility(View.GONE);
+        });
+
+        TextView labelView = new TextView(this);
+        labelView.setText(label);
+        labelView.setTextColor(TEXT);
+        labelView.setTextSize(14);
+        labelView.setSingleLine(true);
+        labelView.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        row.addView(labelView, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        TextView detailView = caption(detail);
+        detailView.setGravity(Gravity.END);
+        row.addView(detailView, new LinearLayout.LayoutParams(dp(112), LinearLayout.LayoutParams.WRAP_CONTENT));
+        return row;
     }
 
     private void setProjectSetupStatus(String message, boolean error) {
@@ -840,8 +997,8 @@ public class MainActivity extends Activity {
     }
 
     private void renderMentions(JSONArray mentions) {
-        if (mentionList == null) return;
         loadedMentions = mentions;
+        if (mentionList == null) return;
         mentionList.removeAllViews();
         int count = Math.min(mentions.length(), 10);
         if (count == 0) {
@@ -904,8 +1061,8 @@ public class MainActivity extends Activity {
     }
 
     private void renderSlashCommands(JSONArray commands) {
-        if (slashCommandList == null) return;
         loadedSlashCommands = commands;
+        if (slashCommandList == null) return;
         slashCommandList.removeAllViews();
         int count = Math.min(commands.length(), 12);
         if (count == 0) {
@@ -1097,14 +1254,16 @@ public class MainActivity extends Activity {
         applyProjectSelection(name, path);
         setProjectSetupStatus("Selected project. Commands now run there.", false);
         if (loadedProjects.length() > 0) renderProjects(loadedProjects);
+        if (projectPanel != null) projectPanel.setVisibility(View.GONE);
     }
 
     private void applyProjectSelection(String name, String path) {
         selectedProjectName = name;
         selectedProjectPath = path;
         if (projectTitle != null) projectTitle.setText(name);
-        if (projectPathLabel != null) projectPathLabel.setText(path);
+        if (projectPathLabel != null) projectPathLabel.setText(path.trim().isEmpty() ? "Server workspace" : "Selected workspace");
         if (metaLabel != null) metaLabel.setText(name);
+        if (chatTitle != null) chatTitle.setText(name);
         updateChatContext();
         loadMentions();
     }
@@ -1304,6 +1463,10 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(142));
         params.topMargin = dp(8);
         return params;
+    }
+
+    private LinearLayout.LayoutParams compactComposerParams() {
+        return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(112));
     }
 
     private LinearLayout.LayoutParams matchWrap() {
