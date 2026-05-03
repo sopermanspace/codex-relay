@@ -13,7 +13,7 @@
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
     <link rel="stylesheet" href="/vendor/xterm/css/xterm.css">
-    <link rel="stylesheet" href="/styles.css?v=6">
+    <link rel="stylesheet" href="/styles.css?v=8">
   </head>
   <body>
     <div class="shell">
@@ -80,6 +80,13 @@
               <button class="key-button" type="button" data-key="down">↓</button>
             </div>
             <textarea id="prompt" rows="3" placeholder="Ask Codex to edit, run, explain, or debug..."></textarea>
+            <section class="slash-panel hidden" id="slashPanel" aria-label="Command and mention suggestions">
+              <div class="slash-panel-head">
+                <span id="paletteTitle">Slash commands</span>
+                <button class="icon-button compact" id="notifyButton" type="button" aria-label="Enable completion notifications">◎</button>
+              </div>
+              <div class="slash-list" id="slashList" role="listbox"></div>
+            </section>
             <div class="actions">
               <button class="secondary" id="interruptButton" type="button">Ctrl+C</button>
               <button class="primary" type="submit">Send</button>
@@ -88,6 +95,6 @@
         </section>
       </main>
     </div>
-    <script src="/app.js?v=6" type="module"></script>
+    <script src="/app.js?v=8" type="module"></script>
   </body>
 </html>

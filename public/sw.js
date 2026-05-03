@@ -1,5 +1,5 @@
-const CACHE_NAME = 'codex-remote-v6';
-const ASSETS = ['/styles.css?v=6', '/app.js?v=6', '/manifest.webmanifest', '/icons/icon.svg', '/brand/codex-remote-logo.svg'];
+const CACHE_NAME = 'codex-remote-v8';
+const ASSETS = ['/styles.css?v=8', '/app.js?v=8', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png', '/brand/codex-remote-logo.svg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -31,5 +31,17 @@ self.addEventListener('fetch', (event) => {
         return response;
       })
       .catch(() => caches.match(event.request))
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      const current = clients.find((client) => 'focus' in client);
+      if (current) return current.focus();
+      if (self.clients.openWindow) return self.clients.openWindow('/');
+      return undefined;
+    })
   );
 });

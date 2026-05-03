@@ -1,10 +1,16 @@
 package com.codex.remote;
 
 import android.app.Activity;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.Manifest;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -14,6 +20,7 @@ import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
@@ -26,6 +33,7 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -40,6 +48,7 @@ import java.nio.charset.StandardCharsets;
 
 public class MainActivity extends Activity {
     private static final String PREFS = "codex_remote";
+    private static final String NOTIFICATION_CHANNEL = "codex_task_status";
     private static final int BG = Color.rgb(6, 7, 10);
     private static final int PANEL = Color.rgb(12, 13, 17);
     private static final int PANEL_2 = Color.rgb(21, 23, 28);
@@ -67,22 +76,27 @@ public class MainActivity extends Activity {
     private TextView projectSetupStatus;
     private TextView chatContextLabel;
     private TextView accessModeHint;
+    private TextView securityStatus;
     private EditText projectNameInput;
     private LinearLayout projectList;
+    private LinearLayout slashCommandList;
+    private LinearLayout mentionList;
     private ProgressBar progressBar;
     private Button unlockButton;
     private Button runButton;
     private Button copyButton;
-    private Button localModeButton;
-    private Button remoteModeButton;
+    private Button autoSecurityButton;
+    private Button homeOnlySecurityButton;
     private SharedPreferences prefs;
     private String serverUrl = "";
     private String token = "";
     private String lastOutput = "";
     private String selectedProjectPath = "";
     private String selectedProjectName = "Default workspace";
-    private String accessMode = "local";
+    private String accessMode = "auto";
     private JSONArray loadedProjects = new JSONArray();
+    private JSONArray loadedSlashCommands = new JSONArray();
+    private JSONArray loadedMentions = new JSONArray();
     private int chatNumber = 1;
 
     @Override
@@ -90,8 +104,9 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         configureWindow();
+        configureNotifications();
         buildLayout();
-        accessMode = prefs.getString("access_mode", "local");
+        accessMode = "local".equals(prefs.getString("access_mode", "auto")) ? "local" : "auto";
         updateAccessModeUi();
         if (getIntent().getBooleanExtra("demo_dashboard", false)) {
             showDemoDashboard();
@@ -114,6 +129,49 @@ public class MainActivity extends Activity {
         window.setStatusBarColor(BG);
         window.setNavigationBarColor(BG);
         window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+    }
+
+    private void configureNotifications() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                NOTIFICATION_CHANNEL,
+                "Codex task status",
+                NotificationManager.IMPORTANCE_DEFAULT
+            );
+            channel.setDescription("Alerts when Codex finishes a phone-started task.");
+            NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            manager.createNotificationChannel(channel);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+            && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 42);
+        }
+    }
+
+    private void notifyTaskDone(String title, String message) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+            && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        PendingIntent pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+
+        android.app.Notification notification = new android.app.Notification.Builder(this, NOTIFICATION_CHANNEL)
+            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build();
+        NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        manager.notify(1001, notification);
     }
 
     private void buildLayout() {
@@ -178,40 +236,16 @@ public class MainActivity extends Activity {
         traitsParams.bottomMargin = dp(22);
         connectScreen.addView(traits, traitsParams);
 
-        LinearLayout modePanel = miniPanel();
-        LinearLayout.LayoutParams modePanelParams = matchWrap();
-        modePanelParams.bottomMargin = dp(22);
-        connectScreen.addView(modePanel, modePanelParams);
-
-        TextView modeTitle = sectionTitle("Choose access");
-        modePanel.addView(modeTitle, matchWrap());
-
-        LinearLayout modeButtons = new LinearLayout(this);
-        modeButtons.setOrientation(LinearLayout.HORIZONTAL);
-        modeButtons.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams modeButtonsParams = matchWrap();
-        modeButtonsParams.topMargin = dp(12);
-        modePanel.addView(modeButtons, modeButtonsParams);
-
-        localModeButton = quietButton("Home network");
-        localModeButton.setOnClickListener(view -> setAccessMode("local"));
-        LinearLayout.LayoutParams localParams = new LinearLayout.LayoutParams(0, dp(48), 1);
-        localParams.rightMargin = dp(8);
-        modeButtons.addView(localModeButton, localParams);
-
-        remoteModeButton = quietButton("Away from home");
-        remoteModeButton.setOnClickListener(view -> setAccessMode("remote"));
-        LinearLayout.LayoutParams remoteParams = new LinearLayout.LayoutParams(0, dp(48), 1);
-        remoteParams.leftMargin = dp(8);
-        modeButtons.addView(remoteModeButton, remoteParams);
-
-        accessModeHint = caption("Use this when your phone is on the same Wi-Fi.");
+        accessModeHint = caption("Use your home Wi-Fi URL here. If you are away, use your secure link.");
+        accessModeHint.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams modeHintParams = matchWrap();
-        modeHintParams.topMargin = dp(10);
-        modePanel.addView(accessModeHint, modeHintParams);
+        modeHintParams.bottomMargin = dp(18);
+        connectScreen.addView(accessModeHint, modeHintParams);
 
         connectScreen.addView(formLabel("Server URL"));
-        serverInput = input(prefs.getString("server", getString(R.string.default_server_url)), false, "http://192.168.18.182:8787");
+        String savedServer = prefs.getString("server", getString(R.string.default_server_url));
+        if (savedServer.contains("192.168.18.182")) savedServer = getString(R.string.default_server_url);
+        serverInput = input(savedServer, false, getString(R.string.default_server_url));
         connectScreen.addView(serverInput, fieldParams());
 
         connectScreen.addView(formLabel("Remote token"));
@@ -282,6 +316,38 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams chatContextParams = matchWrap();
         chatContextParams.topMargin = dp(10);
         statusCard.addView(chatContextLabel, chatContextParams);
+
+        LinearLayout securityCard = miniPanel();
+        LinearLayout.LayoutParams securityParams = matchWrap();
+        securityParams.topMargin = dp(14);
+        workspaceScreen.addView(securityCard, securityParams);
+
+        securityCard.addView(sectionTitle("Security"), matchWrap());
+
+        LinearLayout securityButtons = new LinearLayout(this);
+        securityButtons.setOrientation(LinearLayout.HORIZONTAL);
+        securityButtons.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams securityButtonsParams = matchWrap();
+        securityButtonsParams.topMargin = dp(12);
+        securityCard.addView(securityButtons, securityButtonsParams);
+
+        autoSecurityButton = quietButton("Auto");
+        autoSecurityButton.setOnClickListener(view -> setAccessMode("auto"));
+        LinearLayout.LayoutParams autoParams = new LinearLayout.LayoutParams(0, dp(46), 1);
+        autoParams.rightMargin = dp(8);
+        securityButtons.addView(autoSecurityButton, autoParams);
+
+        homeOnlySecurityButton = quietButton("Home only");
+        homeOnlySecurityButton.setOnClickListener(view -> setAccessMode("local"));
+        LinearLayout.LayoutParams homeOnlyParams = new LinearLayout.LayoutParams(0, dp(46), 1);
+        homeOnlyParams.leftMargin = dp(8);
+        securityButtons.addView(homeOnlySecurityButton, homeOnlyParams);
+
+        securityStatus = caption("Auto works at home and with your secure link.");
+        LinearLayout.LayoutParams securityStatusParams = matchWrap();
+        securityStatusParams.topMargin = dp(10);
+        securityCard.addView(securityStatus, securityStatusParams);
+        updateAccessModeUi();
 
         LinearLayout projectsCard = panel();
         LinearLayout.LayoutParams projectsParams = matchWrap();
@@ -355,6 +421,30 @@ public class MainActivity extends Activity {
         promptInput.setGravity(Gravity.TOP | Gravity.START);
         workspaceScreen.addView(promptInput, tallFieldParams());
 
+        LinearLayout slashCard = miniPanel();
+        LinearLayout.LayoutParams slashParams = matchWrap();
+        slashParams.topMargin = dp(12);
+        workspaceScreen.addView(slashCard, slashParams);
+        slashCard.addView(sectionTitle("Slash commands"), matchWrap());
+        slashCommandList = new LinearLayout(this);
+        slashCommandList.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams slashListParams = matchWrap();
+        slashListParams.topMargin = dp(10);
+        slashCard.addView(slashCommandList, slashListParams);
+        renderSlashCommandLoading();
+
+        LinearLayout mentionCard = miniPanel();
+        LinearLayout.LayoutParams mentionParams = matchWrap();
+        mentionParams.topMargin = dp(12);
+        workspaceScreen.addView(mentionCard, mentionParams);
+        mentionCard.addView(sectionTitle("File mentions"), matchWrap());
+        mentionList = new LinearLayout(this);
+        mentionList.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams mentionListParams = matchWrap();
+        mentionListParams.topMargin = dp(10);
+        mentionCard.addView(mentionList, mentionListParams);
+        renderMentionLoading();
+
         runButton = primaryButton("Send command");
         runButton.setOnClickListener(view -> runCommand());
         LinearLayout.LayoutParams runParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58));
@@ -387,10 +477,6 @@ public class MainActivity extends Activity {
         String nextToken = tokenInput.getText().toString().trim();
         if (!isValidHttpUrl(nextServer)) {
             setConnectStatus("Enter a valid HTTP or HTTPS URL.", true);
-            return;
-        }
-        if ("remote".equals(accessMode) && !"https".equals(Uri.parse(nextServer).getScheme())) {
-            setConnectStatus("Use your secure link for Away mode.", true);
             return;
         }
         if (nextToken.isEmpty()) {
@@ -444,9 +530,15 @@ public class MainActivity extends Activity {
                 if (output.trim().isEmpty()) output = ok ? "Done." : "No output returned.";
                 final String resultTitleText = ok ? "Completed in " + seconds + "s" : "Finished with exit code " + response.optInt("exitCode", -1);
                 final String resultOutputText = output;
-                runOnUiThread(() -> setResult(resultTitleText, resultOutputText, !ok));
+                runOnUiThread(() -> {
+                    setResult(resultTitleText, resultOutputText, !ok);
+                    notifyTaskDone(resultTitleText, ok ? "Codex finished on your Mac." : "Codex needs attention.");
+                });
             } catch (Exception error) {
-                runOnUiThread(() -> setResult("Connection failed", error.getMessage(), true));
+                runOnUiThread(() -> {
+                    setResult("Connection failed", error.getMessage(), true);
+                    notifyTaskDone("Codex command failed", error.getMessage());
+                });
             } finally {
                 runOnUiThread(() -> setBusy(false));
             }
@@ -586,6 +678,8 @@ public class MainActivity extends Activity {
         progressBar.setVisibility(View.GONE);
         metaLabel.setText(serverUrl.replace("http://", "").replace("https://", ""));
         if (!getIntent().getBooleanExtra("demo_dashboard", false)) loadProjects();
+        loadSlashCommands();
+        loadMentions();
         setResult("Result", "No command has been sent yet.", false);
     }
 
@@ -594,7 +688,9 @@ public class MainActivity extends Activity {
         showWorkspace();
         selectProject("New project 5", "/Users/himanshu/Documents/New project 5");
         renderDemoProjects();
+        renderMentions(defaultMentions());
         promptInput.setText("Summarize this repo and list the next three improvements.");
+        renderSlashCommands(defaultSlashCommands());
         setResult(
             "Completed in 18s",
             "1. App-server command API is live.\n2. Android dashboard renders clean output.\n3. Next: signed release build.",
@@ -615,35 +711,43 @@ public class MainActivity extends Activity {
     }
 
     private void setAccessMode(String mode) {
-        accessMode = "remote".equals(mode) ? "remote" : "local";
+        accessMode = "local".equals(mode) ? "local" : "auto";
+        prefs.edit().putString("access_mode", accessMode).apply();
         updateAccessModeUi();
+        if (workspaceScreen != null && workspaceScreen.getVisibility() == View.VISIBLE) {
+            Toast.makeText(this, "Security changed. Reconnect to apply.", Toast.LENGTH_LONG).show();
+            showConnect();
+        }
     }
 
     private void updateAccessModeUi() {
-        if (localModeButton != null) {
+        boolean autoSelected = !"local".equals(accessMode);
+        if (autoSecurityButton != null) {
+            autoSecurityButton.setTextColor(autoSelected ? Color.rgb(3, 4, 7) : TEXT);
+            autoSecurityButton.setBackground(rounded(
+                autoSelected ? ACCENT : PANEL_2,
+                autoSelected ? Color.argb(180, 167, 243, 208) : Color.argb(40, 250, 250, 250),
+                1,
+                20
+            ));
+        }
+        if (homeOnlySecurityButton != null) {
             boolean selected = "local".equals(accessMode);
-            localModeButton.setTextColor(selected ? Color.rgb(3, 4, 7) : TEXT);
-            localModeButton.setBackground(rounded(
+            homeOnlySecurityButton.setTextColor(selected ? Color.rgb(3, 4, 7) : TEXT);
+            homeOnlySecurityButton.setBackground(rounded(
                 selected ? ACCENT : PANEL_2,
                 selected ? Color.argb(180, 167, 243, 208) : Color.argb(40, 250, 250, 250),
                 1,
                 20
             ));
         }
-        if (remoteModeButton != null) {
-            boolean selected = "remote".equals(accessMode);
-            remoteModeButton.setTextColor(selected ? Color.rgb(3, 4, 7) : TEXT);
-            remoteModeButton.setBackground(rounded(
-                selected ? ACCENT : PANEL_2,
-                selected ? Color.argb(180, 167, 243, 208) : Color.argb(40, 250, 250, 250),
-                1,
-                20
-            ));
+        if (securityStatus != null) {
+            securityStatus.setText(autoSelected
+                ? "Auto works at home and with your secure link."
+                : "Home only blocks connections outside your trusted Wi-Fi.");
         }
         if (accessModeHint != null) {
-            accessModeHint.setText("remote".equals(accessMode)
-                ? "Use this when you are not on your home Wi-Fi."
-                : "Use this when your phone is on the same Wi-Fi.");
+            accessModeHint.setText("Use your home Wi-Fi URL here. If you are away, use your secure link.");
         }
     }
 
@@ -679,6 +783,232 @@ public class MainActivity extends Activity {
         if (projectList == null) return;
         projectList.removeAllViews();
         projectList.addView(projectRow("Loading projects...", "Reading folders from your Mac", false, null), matchWrap());
+    }
+
+    private void loadSlashCommands() {
+        if (serverUrl.trim().isEmpty() || token.trim().isEmpty()) {
+            renderSlashCommands(defaultSlashCommands());
+            return;
+        }
+        renderSlashCommandLoading();
+
+        new Thread(() -> {
+            try {
+                JSONArray commands = getSlashCommands();
+                runOnUiThread(() -> renderSlashCommands(commands));
+            } catch (Exception error) {
+                runOnUiThread(() -> renderSlashCommands(defaultSlashCommands()));
+            }
+        }).start();
+    }
+
+    private void loadMentions() {
+        if (serverUrl.trim().isEmpty() || token.trim().isEmpty()) {
+            renderMentions(defaultMentions());
+            return;
+        }
+        renderMentionLoading();
+
+        new Thread(() -> {
+            try {
+                JSONArray mentions = getMentions();
+                runOnUiThread(() -> renderMentions(mentions));
+            } catch (Exception error) {
+                runOnUiThread(() -> renderMentionError(error.getMessage()));
+            }
+        }).start();
+    }
+
+    private JSONArray getMentions() throws Exception {
+        String urlValue = serverUrl + "/api/mentions";
+        if (!selectedProjectPath.trim().isEmpty()) {
+            urlValue += "?cwd=" + Uri.encode(selectedProjectPath);
+        }
+        URL url = new URL(urlValue);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(10000);
+        connection.setReadTimeout(20000);
+        setAccessHeaders(connection);
+        int status = connection.getResponseCode();
+        String response = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
+        if (status == 401) throw new Exception("Token rejected.");
+        if (status < 200 || status >= 300) throw new Exception(response.trim().isEmpty() ? "Server returned " + status + "." : response);
+        JSONObject object = new JSONObject(response);
+        return object.optJSONArray("mentions") == null ? new JSONArray() : object.optJSONArray("mentions");
+    }
+
+    private void renderMentionLoading() {
+        if (mentionList == null) return;
+        mentionList.removeAllViews();
+        mentionList.addView(caption("Loading project files..."), matchWrap());
+    }
+
+    private void renderMentionError(String message) {
+        if (mentionList == null) return;
+        mentionList.removeAllViews();
+        mentionList.addView(caption(message), matchWrap());
+    }
+
+    private void renderMentions(JSONArray mentions) {
+        if (mentionList == null) return;
+        loadedMentions = mentions;
+        mentionList.removeAllViews();
+        int count = Math.min(mentions.length(), 10);
+        if (count == 0) {
+            mentionList.addView(caption("No mentionable files found."), matchWrap());
+            return;
+        }
+        for (int index = 0; index < count; index++) {
+            JSONObject mention = mentions.optJSONObject(index);
+            if (mention == null) continue;
+            String label = mention.optString("label", "");
+            String detail = mention.optString("detail", "Project file");
+            View row = mentionRow(label, detail);
+            LinearLayout.LayoutParams params = matchWrap();
+            if (index > 0) params.topMargin = dp(8);
+            mentionList.addView(row, params);
+        }
+    }
+
+    private View mentionRow(String label, String detail) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(14), dp(12), dp(14), dp(12));
+        row.setBackground(rounded(Color.rgb(4, 5, 8), Color.argb(34, 250, 250, 250), 1, 18));
+        row.setOnClickListener(view -> appendPromptToken(label));
+
+        TextView mentionName = new TextView(this);
+        mentionName.setText(label);
+        mentionName.setTextColor(TEXT);
+        mentionName.setTextSize(13);
+        mentionName.setSingleLine(true);
+        mentionName.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        row.addView(mentionName, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        TextView mentionDetail = caption(detail);
+        mentionDetail.setGravity(Gravity.END);
+        row.addView(mentionDetail, new LinearLayout.LayoutParams(dp(104), LinearLayout.LayoutParams.WRAP_CONTENT));
+        return row;
+    }
+
+    private JSONArray getSlashCommands() throws Exception {
+        URL url = new URL(serverUrl + "/api/slash-commands");
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(10000);
+        connection.setReadTimeout(20000);
+        setAccessHeaders(connection);
+        int status = connection.getResponseCode();
+        String response = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
+        if (status == 401) throw new Exception("Token rejected.");
+        if (status < 200 || status >= 300) throw new Exception(response.trim().isEmpty() ? "Server returned " + status + "." : response);
+        JSONObject object = new JSONObject(response);
+        return object.optJSONArray("commands") == null ? defaultSlashCommands() : object.optJSONArray("commands");
+    }
+
+    private void renderSlashCommandLoading() {
+        if (slashCommandList == null) return;
+        slashCommandList.removeAllViews();
+        slashCommandList.addView(caption("Loading command palette..."), matchWrap());
+    }
+
+    private void renderSlashCommands(JSONArray commands) {
+        if (slashCommandList == null) return;
+        loadedSlashCommands = commands;
+        slashCommandList.removeAllViews();
+        int count = Math.min(commands.length(), 12);
+        if (count == 0) {
+            slashCommandList.addView(caption("No commands available."), matchWrap());
+            return;
+        }
+        for (int index = 0; index < count; index++) {
+            JSONObject command = commands.optJSONObject(index);
+            if (command == null) continue;
+            String name = command.optString("name", "");
+            String detail = command.optString("description", "Codex command");
+            View row = slashCommandRow(name, detail);
+            LinearLayout.LayoutParams params = matchWrap();
+            if (index > 0) params.topMargin = dp(8);
+            slashCommandList.addView(row, params);
+        }
+    }
+
+    private View slashCommandRow(String name, String detail) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(14), dp(12), dp(14), dp(12));
+        row.setBackground(rounded(Color.rgb(4, 5, 8), Color.argb(34, 250, 250, 250), 1, 18));
+        row.setOnClickListener(view -> {
+            appendPromptToken(name);
+        });
+
+        TextView commandName = new TextView(this);
+        commandName.setText(name);
+        commandName.setTextColor(TEXT);
+        commandName.setTextSize(14);
+        commandName.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        row.addView(commandName, new LinearLayout.LayoutParams(dp(92), LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        TextView commandDetail = caption(detail);
+        row.addView(commandDetail, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        return row;
+    }
+
+    private JSONArray defaultSlashCommands() {
+        JSONArray commands = new JSONArray();
+        addSlashCommand(commands, "/help", "Show Codex slash commands.");
+        addSlashCommand(commands, "/model", "Switch the active model.");
+        addSlashCommand(commands, "/approvals", "Change approval behavior.");
+        addSlashCommand(commands, "/status", "Show session status.");
+        addSlashCommand(commands, "/mcp", "Inspect MCP servers.");
+        addSlashCommand(commands, "/diff", "Review code changes.");
+        addSlashCommand(commands, "/compact", "Compact the conversation.");
+        addSlashCommand(commands, "/new", "Start a fresh thread.");
+        addSlashCommand(commands, "/init", "Create project instructions.");
+        addSlashCommand(commands, "/review", "Run a code review.");
+        addSlashCommand(commands, "/quit", "Exit Codex.");
+        addSlashCommand(commands, "/exit", "Exit Codex.");
+        return commands;
+    }
+
+    private void addSlashCommand(JSONArray commands, String name, String description) {
+        JSONObject command = new JSONObject();
+        try {
+            command.put("name", name);
+            command.put("description", description);
+            commands.put(command);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private JSONArray defaultMentions() {
+        JSONArray mentions = new JSONArray();
+        addMention(mentions, "@README.md", "Project root");
+        addMention(mentions, "@AGENTS.md", "Project root");
+        addMention(mentions, "@package.json", "Project root");
+        return mentions;
+    }
+
+    private void addMention(JSONArray mentions, String label, String detail) {
+        JSONObject mention = new JSONObject();
+        try {
+            mention.put("label", label);
+            mention.put("path", label.startsWith("@") ? label.substring(1) : label);
+            mention.put("detail", detail);
+            mentions.put(mention);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void appendPromptToken(String token) {
+        String current = promptInput.getText().toString();
+        String separator = current.trim().isEmpty() || current.endsWith(" ") ? "" : " ";
+        promptInput.setText(current + separator + token + " ");
+        promptInput.setSelection(promptInput.getText().length());
+        promptInput.requestFocus();
     }
 
     private void renderProjectError(String message) {
@@ -784,6 +1114,7 @@ public class MainActivity extends Activity {
         if (projectPathLabel != null) projectPathLabel.setText(path);
         if (metaLabel != null) metaLabel.setText(name);
         updateChatContext();
+        loadMentions();
     }
 
     private void updateChatContext() {

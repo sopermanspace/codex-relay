@@ -18,9 +18,16 @@ const connectButton = document.querySelector('#connectButton');
 const loginError = document.querySelector('#loginError');
 const endpoint = document.querySelector('#endpoint');
 const workspaceName = document.querySelector('#workspaceName');
+const slashPanel = document.querySelector('#slashPanel');
+const slashList = document.querySelector('#slashList');
+const paletteTitle = document.querySelector('#paletteTitle');
+const notifyButton = document.querySelector('#notifyButton');
 
 let socket;
 let token = localStorage.getItem('codexRemoteToken') || '';
+let slashCommands = [];
+let mentionItems = [];
+let lastActivityAt = 0;
 const fitAddon = new FitAddon();
 const term = new Terminal({
   cursorBlink: true,
@@ -92,6 +99,18 @@ composer.addEventListener('submit', (event) => {
   if (!value || !socket || socket.readyState !== WebSocket.OPEN) return;
   sendInput(`${value}\n`);
   promptInput.value = '';
+  hidePalette();
+});
+
+promptInput.addEventListener('input', updatePalette);
+promptInput.addEventListener('focus', updatePalette);
+promptInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') hidePalette();
+});
+
+notifyButton.addEventListener('click', async () => {
+  await requestNotificationPermission();
+  updateNotifyButton();
 });
 
 interruptButton.addEventListener('click', () => {
@@ -174,6 +193,9 @@ async function startSession() {
     fitAddon.fit();
     sendResize();
     term.focus();
+    loadSlashCommands();
+    loadMentions();
+    updateNotifyButton();
   });
 
   socket.addEventListener('message', (event) => {
@@ -181,9 +203,11 @@ async function startSession() {
     if (message.type === 'output') {
       terminal.classList.remove('skeleton');
       term.write(message.data);
+      lastActivityAt = Date.now();
     }
     if (message.type === 'exit') {
       setStatus(`Exited ${message.exitCode}`, 'error');
+      notifyDone(message.exitCode === 0 ? 'Codex task finished' : 'Codex session ended', `Exit code ${message.exitCode}`);
     }
   });
 
@@ -200,6 +224,137 @@ function sendInput(data) {
 function sendResize() {
   if (!socket || socket.readyState !== WebSocket.OPEN) return;
   socket.send(JSON.stringify({ type: 'resize', ...getSize() }));
+}
+
+async function loadSlashCommands() {
+  if (slashCommands.length > 0) return;
+  try {
+    const response = await fetch('/api/slash-commands', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!response.ok) return;
+    const payload = await response.json();
+    slashCommands = Array.isArray(payload.commands) ? payload.commands : [];
+    renderSlashCommands(slashCommands);
+  } catch {
+    slashCommands = [];
+  }
+}
+
+async function loadMentions(query = '') {
+  try {
+    const params = new URLSearchParams();
+    if (query) params.set('q', query);
+    const response = await fetch(`/api/mentions?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!response.ok) return;
+    const payload = await response.json();
+    mentionItems = Array.isArray(payload.mentions) ? payload.mentions : [];
+  } catch {
+    mentionItems = [];
+  }
+}
+
+function updatePalette() {
+  const value = promptInput.value.trimStart();
+  const trigger = getActiveTrigger(value);
+  if (!trigger) {
+    hidePalette();
+    return;
+  }
+
+  if (trigger.type === '/') {
+    loadSlashCommands();
+    const matches = slashCommands.filter((command) => command.name.slice(1).toLowerCase().startsWith(trigger.query));
+    paletteTitle.textContent = 'Slash commands';
+    renderPalette(matches.map((command) => ({
+      label: command.name,
+      detail: command.description,
+      insertText: `${command.name} `
+    })));
+    slashPanel.classList.toggle('hidden', matches.length === 0);
+    return;
+  }
+
+  loadMentions(trigger.query).then(() => {
+    const matches = mentionItems.filter((item) => item.path.toLowerCase().includes(trigger.query));
+    paletteTitle.textContent = 'File mentions';
+    renderPalette(matches.map((item) => ({
+      label: item.label,
+      detail: item.detail,
+      insertText: `${item.label} `
+    })));
+    slashPanel.classList.toggle('hidden', matches.length === 0);
+  });
+}
+
+function getActiveTrigger(value) {
+  const match = value.match(/(?:^|\s)([/@])([^\s]*)$/);
+  if (!match) return null;
+  return {
+    type: match[1],
+    query: match[2].toLowerCase()
+  };
+}
+
+function renderPalette(items) {
+  slashList.replaceChildren();
+  for (const item of items) {
+    const button = document.createElement('button');
+    button.className = 'slash-command';
+    button.type = 'button';
+    button.setAttribute('role', 'option');
+    button.innerHTML = `<strong>${escapeHtml(item.label)}</strong><span>${escapeHtml(item.detail)}</span>`;
+    button.addEventListener('click', () => {
+      promptInput.value = replaceActiveToken(promptInput.value, item.insertText);
+      promptInput.focus();
+      hidePalette();
+    });
+    slashList.append(button);
+  }
+}
+
+function replaceActiveToken(value, replacement) {
+  return value.replace(/(?:^|\s)([/@])[^\s]*$/, (match) => {
+    const prefix = match.startsWith(' ') ? ' ' : '';
+    return `${prefix}${replacement}`;
+  });
+}
+
+function hidePalette() {
+  slashPanel.classList.add('hidden');
+}
+
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'default') {
+    await Notification.requestPermission();
+  }
+}
+
+function updateNotifyButton() {
+  if (!('Notification' in window)) {
+    notifyButton.disabled = true;
+    notifyButton.title = 'Notifications unavailable';
+    return;
+  }
+  const enabled = Notification.permission === 'granted';
+  notifyButton.classList.toggle('is-on', enabled);
+  notifyButton.title = enabled ? 'Completion notifications are on' : 'Enable completion notifications';
+}
+
+function notifyDone(title, body) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  if (Date.now() - lastActivityAt < 1200 && document.visibilityState === 'visible') return;
+  navigator.serviceWorker?.ready
+    .then((registration) => registration.showNotification(title, {
+      body,
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon.svg',
+      tag: 'codex-task-done'
+    }))
+    .catch(() => new Notification(title, { body, icon: '/icons/icon-192.png' }));
 }
 
 function getSize() {
@@ -233,4 +388,14 @@ function debounce(fn, delay) {
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), delay);
   };
+}
+
+function escapeHtml(value = '') {
+  return value.replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[char]);
 }

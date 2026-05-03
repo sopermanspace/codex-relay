@@ -34,6 +34,27 @@ const ignoredProjectDirs = new Set([
   'node_modules',
   'screenshots'
 ]);
+const ignoredMentionExtensions = new Set([
+  '.7z',
+  '.apk',
+  '.bin',
+  '.class',
+  '.dmg',
+  '.exe',
+  '.gif',
+  '.gz',
+  '.ico',
+  '.jar',
+  '.jpeg',
+  '.jpg',
+  '.lock',
+  '.mov',
+  '.mp4',
+  '.pdf',
+  '.png',
+  '.webp',
+  '.zip'
+]);
 const makeToken = customAlphabet('123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz', 32);
 const remoteToken = process.env.REMOTE_TOKEN || makeToken();
 assertSafeRemoteToken(remoteToken, Boolean(process.env.REMOTE_TOKEN));
@@ -49,6 +70,20 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 
 const sessions = new Map();
+const slashCommands = [
+  { name: '/help', description: 'Show Codex slash commands and shortcuts.' },
+  { name: '/model', description: 'Switch the active model.' },
+  { name: '/approvals', description: 'Change approval behavior for commands and edits.' },
+  { name: '/status', description: 'Show session, model, workspace, and account status.' },
+  { name: '/mcp', description: 'Inspect configured MCP servers and tools.' },
+  { name: '/diff', description: 'Review the current code changes.' },
+  { name: '/compact', description: 'Summarize and compact the conversation context.' },
+  { name: '/new', description: 'Start a fresh Codex thread.' },
+  { name: '/init', description: 'Create or refresh project instructions.' },
+  { name: '/review', description: 'Run a focused code review on current changes.' },
+  { name: '/quit', description: 'Exit the interactive Codex session.' },
+  { name: '/exit', description: 'Exit the interactive Codex session.' }
+];
 
 app.disable('x-powered-by');
 if (trustedProxy) {
@@ -84,6 +119,41 @@ app.get('/api/config', (req, res) => {
     workspaceLabel: 'Ready on this Mac',
     tokenRequired: true
   });
+});
+
+app.get('/api/slash-commands', (req, res) => {
+  const access = authorizeRequest(req);
+  if (!access.ok) {
+    res.status(access.status).json({ error: access.error });
+    return;
+  }
+
+  res.json({
+    ok: true,
+    commands: slashCommands
+  });
+});
+
+app.get('/api/mentions', async (req, res) => {
+  const access = authorizeRequest(req);
+  if (!access.ok) {
+    res.status(access.status).json({ error: access.error });
+    return;
+  }
+
+  const cwd = resolveRequestedCwd(req.query.cwd);
+  if (!cwd) {
+    res.status(400).json({ error: 'Project folder is outside the allowed roots.' });
+    return;
+  }
+
+  try {
+    const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const mentions = await listMentions(cwd, query);
+    res.json({ ok: true, cwd, mentions });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
 });
 
 app.get('/api/auth', (req, res) => {
@@ -247,6 +317,19 @@ app.post('/api/command', async (req, res) => {
 
   const startedAt = Date.now();
   try {
+    const slashCommand = resolveSlashCommand(prompt);
+    if (slashCommand) {
+      const result = await runSlashCommand(slashCommand, cwd);
+      res.json({
+        ok: result.exitCode === 0,
+        exitCode: result.exitCode,
+        output: result.output,
+        cwd,
+        durationMs: Date.now() - startedAt
+      });
+      return;
+    }
+
     const result = await runCodexExec(prompt, cwd);
     res.json({
       ok: result.exitCode === 0,
@@ -392,7 +475,7 @@ function authorizeRequest(req, override = {}) {
     return { ok: false, status: 403, error: 'Connection blocked.' };
   }
 
-  if (mode === 'remote') {
+  if (mode === 'remote' || (mode === 'auto' && !isPrivateNetworkIp(ip))) {
     if (!isSecureRequest(req)) {
       return { ok: false, status: 403, error: 'Connection blocked.' };
     }
@@ -408,7 +491,9 @@ function authorizeRequest(req, override = {}) {
 }
 
 function normalizeAccessMode(value) {
-  return value === 'remote' ? 'remote' : 'local';
+  if (value === 'remote' || value === 'secure') return 'remote';
+  if (value === 'local' || value === 'local_only') return 'local';
+  return 'auto';
 }
 
 function isSecureRequest(req) {
@@ -587,6 +672,53 @@ async function projectMeta(projectPath) {
   };
 }
 
+async function listMentions(cwd, query = '') {
+  const root = path.resolve(cwd);
+  const normalizedQuery = query.toLowerCase();
+  const results = [];
+  const maxResults = Number(process.env.CODEX_MAX_MENTIONS || 80);
+  const maxVisited = Number(process.env.CODEX_MAX_MENTION_SCAN || 1800);
+  let visited = 0;
+
+  async function walk(current) {
+    if (results.length >= maxResults || visited >= maxVisited) return;
+    let entries;
+    try {
+      entries = await fs.readdir(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    entries.sort((a, b) => {
+      if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    for (const entry of entries) {
+      if (results.length >= maxResults || visited >= maxVisited) return;
+      if (entry.name.startsWith('.') || ignoredProjectDirs.has(entry.name)) continue;
+      const fullPath = path.join(current, entry.name);
+      const relativePath = path.relative(root, fullPath);
+      if (entry.isDirectory()) {
+        await walk(fullPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      visited += 1;
+      if (ignoredMentionExtensions.has(path.extname(entry.name).toLowerCase())) continue;
+      if (normalizedQuery && !relativePath.toLowerCase().includes(normalizedQuery)) continue;
+      results.push({
+        label: `@${relativePath}`,
+        path: relativePath,
+        detail: path.dirname(relativePath) === '.' ? 'Project root' : path.dirname(relativePath)
+      });
+    }
+  }
+
+  await walk(root);
+  return results;
+}
+
 async function exists(targetPath) {
   try {
     await fs.access(targetPath);
@@ -671,4 +803,60 @@ function runCodexExec(prompt, cwd = codexWorkdir) {
       });
     });
   });
+}
+
+function resolveSlashCommand(prompt) {
+  const [rawName, ...rest] = prompt.trim().split(/\s+/);
+  if (!rawName?.startsWith('/')) return null;
+  const command = slashCommands.find((item) => item.name === rawName.toLowerCase());
+  if (!command) return null;
+  return {
+    name: command.name,
+    args: rest.join(' ')
+  };
+}
+
+async function runSlashCommand(command, cwd) {
+  if (command.name === '/help') {
+    return {
+      exitCode: 0,
+      output: slashCommands.map((item) => `${item.name.padEnd(11)} ${item.description}`).join('\n')
+    };
+  }
+
+  if (command.name === '/review') {
+    return runCodexExec('Review the current code changes and provide prioritized, actionable findings.', cwd);
+  }
+
+  if (command.name === '/diff') {
+    return runCodexExec('Inspect the current repository diff and summarize the meaningful changes.', cwd);
+  }
+
+  if (command.name === '/init') {
+    return runCodexExec('Create or update the project AGENTS.md instructions for this repository.', cwd);
+  }
+
+  if (command.name === '/status') {
+    return {
+      exitCode: 0,
+      output: [
+        'Codex Relay is connected.',
+        `Workspace: ${cwd}`,
+        `Command: ${codexCommand}`,
+        'Use the live terminal for interactive model, approval, MCP, compact, new, and exit controls.'
+      ].join('\n')
+    };
+  }
+
+  if (command.name === '/new') {
+    return {
+      exitCode: 0,
+      output: 'New chat controls are available from the phone dashboard. Start a new chat, then send your next task.'
+    };
+  }
+
+  return {
+    exitCode: 0,
+    output: `${command.name} is an interactive Codex slash command. Open the live terminal in Codex Relay to run it directly.`
+  };
 }
