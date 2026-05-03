@@ -104,6 +104,61 @@ app.get('/api/projects', async (req, res) => {
   }
 });
 
+app.post('/api/projects', async (req, res) => {
+  const token = getBearerToken(req);
+  if (!isAuthorized(token)) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  const brief = typeof req.body?.brief === 'string' ? req.body.brief.trim() : '';
+  const safeName = sanitizeProjectName(name);
+  if (!safeName) {
+    res.status(400).json({ error: 'Project name can use letters, numbers, spaces, dashes, underscores, and dots.' });
+    return;
+  }
+
+  const root = projectRoots[0] || path.join(os.homedir(), 'Documents');
+  const projectPath = path.join(root, safeName);
+  if (!isAllowedProjectPath(projectPath)) {
+    res.status(400).json({ error: 'Project folder is outside the allowed roots.' });
+    return;
+  }
+
+  try {
+    await fs.mkdir(projectPath, { recursive: false });
+    await fs.writeFile(
+      path.join(projectPath, 'README.md'),
+      `# ${safeName}\n\n${brief || 'Created from Codex Relay mobile project setup.'}\n`,
+      'utf8'
+    );
+    await fs.writeFile(
+      path.join(projectPath, 'AGENTS.md'),
+      [
+        '# AGENTS.md instructions',
+        '',
+        'Treat this folder as the active Codex project.',
+        'Before editing, inspect the repository structure and preserve user changes.',
+        'Prefer small, verifiable steps and explain important results clearly.',
+        ''
+      ].join('\n'),
+      'utf8'
+    );
+
+    res.status(201).json({
+      ok: true,
+      project: await projectMeta(projectPath)
+    });
+  } catch (error) {
+    if (error.code === 'EEXIST') {
+      res.status(409).json({ ok: false, error: 'A project with that name already exists.' });
+      return;
+    }
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 app.post('/api/session', (req, res) => {
   const token = getBearerToken(req);
   if (!isAuthorized(token)) {
@@ -275,6 +330,13 @@ function getBearerToken(req) {
 
 function isAuthorized(token) {
   return typeof token === 'string' && token.length > 0 && token === remoteToken;
+}
+
+function sanitizeProjectName(name) {
+  if (!name || name.length > 80) return '';
+  if (name.includes('/') || name.includes('\\') || name === '.' || name === '..') return '';
+  if (!/^[\w .-]+$/u.test(name)) return '';
+  return name.replace(/\s+/g, ' ').trim();
 }
 
 function clamp(value, min, max) {

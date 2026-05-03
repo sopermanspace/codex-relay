@@ -64,6 +64,8 @@ public class MainActivity extends Activity {
     private TextView metaLabel;
     private TextView projectTitle;
     private TextView projectPathLabel;
+    private TextView projectSetupStatus;
+    private EditText projectNameInput;
     private LinearLayout projectList;
     private ProgressBar progressBar;
     private Button unlockButton;
@@ -261,6 +263,27 @@ public class MainActivity extends Activity {
         projectPathParams.topMargin = dp(4);
         projectsCard.addView(projectPathLabel, projectPathParams);
 
+        LinearLayout setupRow = new LinearLayout(this);
+        setupRow.setOrientation(LinearLayout.HORIZONTAL);
+        setupRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams setupParams = matchWrap();
+        setupParams.topMargin = dp(14);
+        projectsCard.addView(setupRow, setupParams);
+
+        projectNameInput = input("", false, "New project name");
+        setupRow.addView(projectNameInput, new LinearLayout.LayoutParams(0, dp(52), 1));
+
+        Button createProject = quietButton("Create");
+        createProject.setOnClickListener(view -> createProjectFromInput());
+        LinearLayout.LayoutParams createParams = new LinearLayout.LayoutParams(dp(92), dp(52));
+        createParams.leftMargin = dp(10);
+        setupRow.addView(createProject, createParams);
+
+        projectSetupStatus = caption("Create a folder, then run Codex inside it.");
+        LinearLayout.LayoutParams setupStatusParams = matchWrap();
+        setupStatusParams.topMargin = dp(8);
+        projectsCard.addView(projectSetupStatus, setupStatusParams);
+
         projectList = new LinearLayout(this);
         projectList.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams projectListParams = matchWrap();
@@ -439,6 +462,56 @@ public class MainActivity extends Activity {
         return object.optJSONArray("projects") == null ? new JSONArray() : object.optJSONArray("projects");
     }
 
+    private void createProjectFromInput() {
+        String name = projectNameInput.getText().toString().trim();
+        if (name.isEmpty()) {
+            setProjectSetupStatus("Enter a project name.", true);
+            return;
+        }
+        setProjectSetupStatus("Creating project on your Mac...", false);
+
+        new Thread(() -> {
+            try {
+                JSONObject project = createProject(name);
+                String projectName = project.optString("name", name);
+                String projectPath = project.optString("path", "");
+                runOnUiThread(() -> {
+                    projectNameInput.setText("");
+                    selectProject(projectName, projectPath);
+                    setProjectSetupStatus("Project ready. Commands now run there.", false);
+                    loadProjects();
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> setProjectSetupStatus(error.getMessage(), true));
+            }
+        }).start();
+    }
+
+    private JSONObject createProject(String name) throws Exception {
+        URL url = new URL(serverUrl + "/api/projects");
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("POST");
+        connection.setConnectTimeout(10000);
+        connection.setReadTimeout(20000);
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Content-Type", "application/json");
+        connection.setRequestProperty("Authorization", "Bearer " + token);
+        JSONObject body = new JSONObject();
+        body.put("name", name);
+        body.put("brief", "Created from Codex Relay mobile setup.");
+        byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
+        try (OutputStream out = connection.getOutputStream()) {
+            out.write(payload);
+        }
+
+        int status = connection.getResponseCode();
+        String response = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
+        if (status == 401) throw new Exception("Token rejected.");
+        if (status < 200 || status >= 300) throw new Exception(response.trim().isEmpty() ? "Server returned " + status + "." : response);
+        JSONObject object = new JSONObject(response);
+        return object.optJSONObject("project") == null ? new JSONObject() : object.optJSONObject("project");
+    }
+
     private void showConnect() {
         connectScreen.setVisibility(View.VISIBLE);
         workspaceScreen.setVisibility(View.GONE);
@@ -486,6 +559,12 @@ public class MainActivity extends Activity {
         resultBody.setText(body);
         lastOutput = body;
         copyButton.setEnabled(!body.trim().isEmpty() && !"No output yet.".equals(body));
+    }
+
+    private void setProjectSetupStatus(String message, boolean error) {
+        if (projectSetupStatus == null) return;
+        projectSetupStatus.setText(message);
+        projectSetupStatus.setTextColor(error ? ERROR : SOFT);
     }
 
     private void renderProjectLoading() {
