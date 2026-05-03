@@ -66,18 +66,22 @@ public class MainActivity extends Activity {
     private TextView projectPathLabel;
     private TextView projectSetupStatus;
     private TextView chatContextLabel;
+    private TextView accessModeHint;
     private EditText projectNameInput;
     private LinearLayout projectList;
     private ProgressBar progressBar;
     private Button unlockButton;
     private Button runButton;
     private Button copyButton;
+    private Button localModeButton;
+    private Button remoteModeButton;
     private SharedPreferences prefs;
     private String serverUrl = "";
     private String token = "";
     private String lastOutput = "";
     private String selectedProjectPath = "";
     private String selectedProjectName = "Default workspace";
+    private String accessMode = "local";
     private JSONArray loadedProjects = new JSONArray();
     private int chatNumber = 1;
 
@@ -87,6 +91,8 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         configureWindow();
         buildLayout();
+        accessMode = prefs.getString("access_mode", "local");
+        updateAccessModeUi();
         if (getIntent().getBooleanExtra("demo_dashboard", false)) {
             showDemoDashboard();
         } else {
@@ -171,6 +177,38 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams traitsParams = centerWrap();
         traitsParams.bottomMargin = dp(22);
         connectScreen.addView(traits, traitsParams);
+
+        LinearLayout modePanel = miniPanel();
+        LinearLayout.LayoutParams modePanelParams = matchWrap();
+        modePanelParams.bottomMargin = dp(22);
+        connectScreen.addView(modePanel, modePanelParams);
+
+        TextView modeTitle = sectionTitle("Choose access");
+        modePanel.addView(modeTitle, matchWrap());
+
+        LinearLayout modeButtons = new LinearLayout(this);
+        modeButtons.setOrientation(LinearLayout.HORIZONTAL);
+        modeButtons.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams modeButtonsParams = matchWrap();
+        modeButtonsParams.topMargin = dp(12);
+        modePanel.addView(modeButtons, modeButtonsParams);
+
+        localModeButton = quietButton("Home network");
+        localModeButton.setOnClickListener(view -> setAccessMode("local"));
+        LinearLayout.LayoutParams localParams = new LinearLayout.LayoutParams(0, dp(48), 1);
+        localParams.rightMargin = dp(8);
+        modeButtons.addView(localModeButton, localParams);
+
+        remoteModeButton = quietButton("Away from home");
+        remoteModeButton.setOnClickListener(view -> setAccessMode("remote"));
+        LinearLayout.LayoutParams remoteParams = new LinearLayout.LayoutParams(0, dp(48), 1);
+        remoteParams.leftMargin = dp(8);
+        modeButtons.addView(remoteModeButton, remoteParams);
+
+        accessModeHint = caption("Use this when your phone is on the same Wi-Fi.");
+        LinearLayout.LayoutParams modeHintParams = matchWrap();
+        modeHintParams.topMargin = dp(10);
+        modePanel.addView(accessModeHint, modeHintParams);
 
         connectScreen.addView(formLabel("Server URL"));
         serverInput = input(prefs.getString("server", getString(R.string.default_server_url)), false, "http://192.168.18.182:8787");
@@ -351,6 +389,10 @@ public class MainActivity extends Activity {
             setConnectStatus("Enter a valid HTTP or HTTPS URL.", true);
             return;
         }
+        if ("remote".equals(accessMode) && !"https".equals(Uri.parse(nextServer).getScheme())) {
+            setConnectStatus("Use your secure link for Away mode.", true);
+            return;
+        }
         if (nextToken.isEmpty()) {
             setConnectStatus("Remote token is required.", true);
             return;
@@ -365,7 +407,11 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             try {
                 verifyAuth();
-                prefs.edit().putString("server", serverUrl).putString("token", token).apply();
+                prefs.edit()
+                    .putString("server", serverUrl)
+                    .putString("token", token)
+                    .putString("access_mode", accessMode)
+                    .apply();
                 runOnUiThread(this::showWorkspace);
             } catch (Exception error) {
                 runOnUiThread(() -> setConnectStatus(error.getMessage(), true));
@@ -415,7 +461,7 @@ public class MainActivity extends Activity {
         connection.setReadTimeout(600000);
         connection.setDoOutput(true);
         connection.setRequestProperty("Content-Type", "application/json");
-        connection.setRequestProperty("Authorization", "Bearer " + token);
+        setAccessHeaders(connection);
         JSONObject body = new JSONObject();
         body.put("prompt", prompt);
         if (!selectedProjectPath.trim().isEmpty()) body.put("cwd", selectedProjectPath);
@@ -440,7 +486,7 @@ public class MainActivity extends Activity {
         connection.setRequestMethod("GET");
         connection.setConnectTimeout(10000);
         connection.setReadTimeout(10000);
-        connection.setRequestProperty("Authorization", "Bearer " + token);
+        setAccessHeaders(connection);
         int status = connection.getResponseCode();
         if (status == 401) throw new Exception("Token rejected.");
         if (status < 200 || status >= 300) throw new Exception("Server returned " + status + ".");
@@ -468,7 +514,7 @@ public class MainActivity extends Activity {
         connection.setRequestMethod("GET");
         connection.setConnectTimeout(10000);
         connection.setReadTimeout(20000);
-        connection.setRequestProperty("Authorization", "Bearer " + token);
+        setAccessHeaders(connection);
         int status = connection.getResponseCode();
         String response = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
         if (status == 401) throw new Exception("Token rejected.");
@@ -510,7 +556,7 @@ public class MainActivity extends Activity {
         connection.setReadTimeout(20000);
         connection.setDoOutput(true);
         connection.setRequestProperty("Content-Type", "application/json");
-        connection.setRequestProperty("Authorization", "Bearer " + token);
+        setAccessHeaders(connection);
         JSONObject body = new JSONObject();
         body.put("name", name);
         body.put("brief", "Created from Codex Relay mobile setup.");
@@ -566,6 +612,44 @@ public class MainActivity extends Activity {
     private void setConnectStatus(String message, boolean error) {
         connectionStatus.setText(message);
         connectionStatus.setTextColor(error ? ERROR : SOFT);
+    }
+
+    private void setAccessMode(String mode) {
+        accessMode = "remote".equals(mode) ? "remote" : "local";
+        updateAccessModeUi();
+    }
+
+    private void updateAccessModeUi() {
+        if (localModeButton != null) {
+            boolean selected = "local".equals(accessMode);
+            localModeButton.setTextColor(selected ? Color.rgb(3, 4, 7) : TEXT);
+            localModeButton.setBackground(rounded(
+                selected ? ACCENT : PANEL_2,
+                selected ? Color.argb(180, 167, 243, 208) : Color.argb(40, 250, 250, 250),
+                1,
+                20
+            ));
+        }
+        if (remoteModeButton != null) {
+            boolean selected = "remote".equals(accessMode);
+            remoteModeButton.setTextColor(selected ? Color.rgb(3, 4, 7) : TEXT);
+            remoteModeButton.setBackground(rounded(
+                selected ? ACCENT : PANEL_2,
+                selected ? Color.argb(180, 167, 243, 208) : Color.argb(40, 250, 250, 250),
+                1,
+                20
+            ));
+        }
+        if (accessModeHint != null) {
+            accessModeHint.setText("remote".equals(accessMode)
+                ? "Use this when you are not on your home Wi-Fi."
+                : "Use this when your phone is on the same Wi-Fi.");
+        }
+    }
+
+    private void setAccessHeaders(HttpURLConnection connection) {
+        connection.setRequestProperty("Authorization", "Bearer " + token);
+        connection.setRequestProperty("X-Codex-Access-Mode", accessMode);
     }
 
     private void setResult(String title, String body, boolean error) {

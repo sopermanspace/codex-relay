@@ -1,6 +1,7 @@
 import 'dotenv/config';
 
 import http from 'node:http';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -35,6 +36,12 @@ const ignoredProjectDirs = new Set([
 ]);
 const makeToken = customAlphabet('123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz', 32);
 const remoteToken = process.env.REMOTE_TOKEN || makeToken();
+const trustedProxy = process.env.TRUST_PROXY === 'true';
+const allowedRemoteOrigins = parseCsv(process.env.REMOTE_ALLOWED_ORIGINS);
+const maxFailedAuth = Number(process.env.REMOTE_MAX_FAILED_AUTH || 12);
+const failedAuthWindowMs = Number(process.env.REMOTE_AUTH_WINDOW_MS || 10 * 60 * 1000);
+const sessionTtlMs = Number(process.env.CODEX_SESSION_TTL_MS || 30 * 60 * 1000);
+const failedAuth = new Map();
 
 const app = express();
 const server = http.createServer(app);
@@ -43,14 +50,22 @@ const wss = new WebSocketServer({ noServer: true });
 const sessions = new Map();
 
 app.disable('x-powered-by');
+if (trustedProxy) {
+  app.set('trust proxy', true);
+}
 app.use((req, res, next) => {
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (isSecureRequest(req)) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
   next();
 });
-app.use(express.json());
+app.use(express.json({ limit: '64kb' }));
 app.use('/vendor/xterm', express.static(path.join(rootDir, 'node_modules/@xterm/xterm'), { maxAge: '1h' }));
 app.use('/vendor/xterm-fit', express.static(path.join(rootDir, 'node_modules/@xterm/addon-fit'), { maxAge: '1h' }));
 app.use(express.static(publicDir, {
@@ -71,9 +86,9 @@ app.get('/api/config', (req, res) => {
 });
 
 app.get('/api/auth', (req, res) => {
-  const token = getBearerToken(req);
-  if (!isAuthorized(token)) {
-    res.status(401).json({ error: 'Unauthorized' });
+  const access = authorizeRequest(req);
+  if (!access.ok) {
+    res.status(access.status).json({ error: access.error });
     return;
   }
 
@@ -85,9 +100,9 @@ app.get('/api/auth', (req, res) => {
 });
 
 app.get('/api/projects', async (req, res) => {
-  const token = getBearerToken(req);
-  if (!isAuthorized(token)) {
-    res.status(401).json({ error: 'Unauthorized' });
+  const access = authorizeRequest(req);
+  if (!access.ok) {
+    res.status(access.status).json({ error: access.error });
     return;
   }
 
@@ -105,9 +120,9 @@ app.get('/api/projects', async (req, res) => {
 });
 
 app.post('/api/projects', async (req, res) => {
-  const token = getBearerToken(req);
-  if (!isAuthorized(token)) {
-    res.status(401).json({ error: 'Unauthorized' });
+  const access = authorizeRequest(req);
+  if (!access.ok) {
+    res.status(access.status).json({ error: access.error });
     return;
   }
 
@@ -160,9 +175,9 @@ app.post('/api/projects', async (req, res) => {
 });
 
 app.post('/api/session', (req, res) => {
-  const token = getBearerToken(req);
-  if (!isAuthorized(token)) {
-    res.status(401).json({ error: 'Unauthorized' });
+  const access = authorizeRequest(req);
+  if (!access.ok) {
+    res.status(access.status).json({ error: access.error });
     return;
   }
 
@@ -213,9 +228,9 @@ app.post('/api/session', (req, res) => {
 });
 
 app.post('/api/command', async (req, res) => {
-  const token = getBearerToken(req);
-  if (!isAuthorized(token)) {
-    res.status(401).json({ error: 'Unauthorized' });
+  const access = authorizeRequest(req);
+  if (!access.ok) {
+    res.status(access.status).json({ error: access.error });
     return;
   }
 
@@ -253,8 +268,11 @@ server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url || '/', `http://${req.headers.host}`);
   const token = url.searchParams.get('token');
   const id = url.searchParams.get('session');
+  const mode = url.searchParams.get('mode') || req.headers['x-codex-access-mode'];
 
-  if (!isAuthorized(token) || !id || !sessions.has(id)) {
+  const access = authorizeRequest(req, { token, mode });
+  const session = sessions.get(id);
+  if (!access.ok || !id || !session || isSessionExpired(session)) {
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
     socket.destroy();
     return;
@@ -267,7 +285,7 @@ server.on('upgrade', (req, socket, head) => {
 
 wss.on('connection', (ws, req, id) => {
   const session = sessions.get(id);
-  if (!session) {
+  if (!session || isSessionExpired(session)) {
     ws.close();
     return;
   }
@@ -323,13 +341,140 @@ server.listen(port, host, () => {
   }
 });
 
+setInterval(cleanupSecurityState, 60_000).unref();
+
 function getBearerToken(req) {
   const auth = req.headers.authorization || '';
   return auth.startsWith('Bearer ') ? auth.slice(7) : '';
 }
 
 function isAuthorized(token) {
-  return typeof token === 'string' && token.length > 0 && token === remoteToken;
+  if (typeof token !== 'string' || token.length === 0) return false;
+  const expected = Buffer.from(remoteToken);
+  const received = Buffer.from(token);
+  if (expected.length !== received.length) return false;
+  return crypto.timingSafeEqual(expected, received);
+}
+
+function authorizeRequest(req, override = {}) {
+  const ip = getClientIp(req);
+  if (isRateLimited(ip)) {
+    return { ok: false, status: 429, error: 'Too many attempts. Try again later.' };
+  }
+
+  const token = override.token ?? getBearerToken(req);
+  if (!isAuthorized(token)) {
+    noteFailedAuth(ip);
+    return { ok: false, status: 401, error: 'Unauthorized' };
+  }
+
+  const mode = normalizeAccessMode(override.mode ?? req.headers['x-codex-access-mode']);
+  if (mode === 'local' && !isPrivateNetworkIp(ip)) {
+    return { ok: false, status: 403, error: 'Connection blocked.' };
+  }
+
+  if (mode === 'remote') {
+    if (!isSecureRequest(req)) {
+      return { ok: false, status: 403, error: 'Connection blocked.' };
+    }
+
+    const origin = req.headers.origin;
+    if (allowedRemoteOrigins.length > 0 && origin && !allowedRemoteOrigins.includes(origin)) {
+      return { ok: false, status: 403, error: 'Connection blocked.' };
+    }
+  }
+
+  clearFailedAuth(ip);
+  return { ok: true, mode, ip };
+}
+
+function normalizeAccessMode(value) {
+  return value === 'remote' ? 'remote' : 'local';
+}
+
+function isSecureRequest(req) {
+  if (req.socket.encrypted || req.secure) return true;
+  if (!trustedProxy) return false;
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  return proto === 'https';
+}
+
+function getClientIp(req) {
+  const forwarded = trustedProxy ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : '';
+  return normalizeIp(forwarded || req.socket.remoteAddress || req.ip || '');
+}
+
+function normalizeIp(value) {
+  if (!value) return '';
+  if (value.startsWith('::ffff:')) return value.slice(7);
+  if (value === '::1') return '127.0.0.1';
+  return value;
+}
+
+function isPrivateNetworkIp(ip) {
+  if (ip === '127.0.0.1' || ip === 'localhost') return true;
+  if (ip.startsWith('10.')) return true;
+  if (ip.startsWith('192.168.')) return true;
+  if (ip.startsWith('172.')) {
+    const second = Number(ip.split('.')[1]);
+    return second >= 16 && second <= 31;
+  }
+  if (ip.startsWith('169.254.')) return true;
+  if (ip === '::1' || ip.toLowerCase().startsWith('fc') || ip.toLowerCase().startsWith('fd') || ip.toLowerCase().startsWith('fe80:')) return true;
+  return false;
+}
+
+function noteFailedAuth(ip) {
+  const now = Date.now();
+  const current = failedAuth.get(ip) || { count: 0, firstAt: now };
+  if (now - current.firstAt > failedAuthWindowMs) {
+    failedAuth.set(ip, { count: 1, firstAt: now });
+    return;
+  }
+  current.count += 1;
+  failedAuth.set(ip, current);
+}
+
+function clearFailedAuth(ip) {
+  failedAuth.delete(ip);
+}
+
+function isRateLimited(ip) {
+  const current = failedAuth.get(ip);
+  if (!current) return false;
+  const now = Date.now();
+  if (now - current.firstAt > failedAuthWindowMs) {
+    failedAuth.delete(ip);
+    return false;
+  }
+  return current.count >= maxFailedAuth;
+}
+
+function isSessionExpired(session) {
+  return Date.now() - session.createdAt > sessionTtlMs;
+}
+
+function cleanupSecurityState() {
+  const now = Date.now();
+  for (const [ip, item] of failedAuth) {
+    if (now - item.firstAt > failedAuthWindowMs) failedAuth.delete(ip);
+  }
+
+  for (const [id, session] of sessions) {
+    if (!isSessionExpired(session)) continue;
+    session.shell.kill();
+    for (const client of session.clients) {
+      client.close();
+    }
+    sessions.delete(id);
+  }
+}
+
+function parseCsv(value = '') {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function sanitizeProjectName(name) {
