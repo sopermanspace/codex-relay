@@ -78,7 +78,11 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         configureWindow();
         buildLayout();
-        showConnect();
+        if (getIntent().getBooleanExtra("demo_dashboard", false)) {
+            showDemoDashboard();
+        } else {
+            showConnect();
+        }
     }
 
     @Override
@@ -399,6 +403,17 @@ public class MainActivity extends Activity {
         progressBar.setVisibility(View.GONE);
         metaLabel.setText(serverUrl.replace("http://", "").replace("https://", ""));
         setResult("Result", "No output yet. Your next result will appear here as clean text instead of broken terminal frames.", false);
+    }
+
+    private void showDemoDashboard() {
+        serverUrl = "http://192.168.18.182:8787";
+        showWorkspace();
+        promptInput.setText("Summarize this repo and list the next three improvements.");
+        setResult(
+            "Completed in 18s",
+            "1. App-server command API is live.\n2. Android dashboard renders clean output.\n3. Next: signed release build.",
+            false
+        );
     }
 
     private void setBusy(boolean busy) {

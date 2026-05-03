@@ -1,0 +1,53 @@
+name: Capture Android Screenshots
+
+on:
+  workflow_dispatch:
+
+jobs:
+  screenshots:
+    name: Capture APK screens
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Build debug APK
+        working-directory: android-native
+        run: gradle assembleDebug
+
+      - name: Capture screenshots
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          script: |
+            mkdir -p screenshots
+            adb install -r android-native/app/build/outputs/apk/debug/app-debug.apk
+            adb shell am start -n com.codex.remote/.MainActivity
+            sleep 4
+            adb exec-out screencap -p > screenshots/codex-relay-connect.png
+            adb shell am force-stop com.codex.remote
+            adb shell am start -n com.codex.remote/.MainActivity --ez demo_dashboard true
+            sleep 4
+            adb exec-out screencap -p > screenshots/codex-relay-dashboard.png
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-relay-apk-screenshots
+          path: screenshots/*.png
+          if-no-files-found: error
