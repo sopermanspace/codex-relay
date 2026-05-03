@@ -65,6 +65,7 @@ public class MainActivity extends Activity {
     private TextView projectTitle;
     private TextView projectPathLabel;
     private TextView projectSetupStatus;
+    private TextView chatContextLabel;
     private EditText projectNameInput;
     private LinearLayout projectList;
     private ProgressBar progressBar;
@@ -78,6 +79,7 @@ public class MainActivity extends Activity {
     private String selectedProjectPath = "";
     private String selectedProjectName = "Default workspace";
     private JSONArray loadedProjects = new JSONArray();
+    private int chatNumber = 1;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -233,10 +235,15 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams modeParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
         modeParams.leftMargin = dp(12);
         statusRow.addView(mode, modeParams);
-        TextView statusText = body("Send a task and get clean output from the Codex agent on your Mac.");
+        TextView statusText = body("Choose a project, start a chat, then send focused Codex tasks to your Mac.");
         LinearLayout.LayoutParams statusTextParams = matchWrap();
         statusTextParams.topMargin = dp(12);
         statusCard.addView(statusText, statusTextParams);
+
+        chatContextLabel = caption("Chat 1 · No project selected");
+        LinearLayout.LayoutParams chatContextParams = matchWrap();
+        chatContextParams.topMargin = dp(10);
+        statusCard.addView(chatContextLabel, chatContextParams);
 
         LinearLayout projectsCard = panel();
         LinearLayout.LayoutParams projectsParams = matchWrap();
@@ -246,11 +253,18 @@ public class MainActivity extends Activity {
         LinearLayout projectsHeader = new LinearLayout(this);
         projectsHeader.setGravity(Gravity.CENTER_VERTICAL);
         projectsCard.addView(projectsHeader, matchWrap());
-        TextView projectsLabel = sectionTitle("Projects");
+        TextView projectsLabel = sectionTitle("Project Sidebar");
         projectsHeader.addView(projectsLabel, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        Button refreshProjects = quietButton("Refresh");
+
+        Button refreshProjects = quietButton("Sync");
         refreshProjects.setOnClickListener(view -> loadProjects());
-        projectsHeader.addView(refreshProjects, new LinearLayout.LayoutParams(dp(98), dp(42)));
+        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(dp(72), dp(42));
+        refreshParams.rightMargin = dp(8);
+        projectsHeader.addView(refreshProjects, refreshParams);
+
+        Button newChat = quietButton("New Chat");
+        newChat.setOnClickListener(view -> startNewChat());
+        projectsHeader.addView(newChat, new LinearLayout.LayoutParams(dp(108), dp(42)));
 
         projectTitle = body("Default workspace");
         projectTitle.setTextColor(TEXT);
@@ -562,6 +576,15 @@ public class MainActivity extends Activity {
         copyButton.setEnabled(!body.trim().isEmpty() && !"No output yet.".equals(body));
     }
 
+    private void startNewChat() {
+        chatNumber += 1;
+        promptInput.setText("");
+        setResult("New chat", "No command has been sent yet.", false);
+        setBusy(false);
+        updateChatContext();
+        setProjectSetupStatus("New chat started in " + selectedProjectName + ".", false);
+    }
+
     private void setProjectSetupStatus(String message, boolean error) {
         if (projectSetupStatus == null) return;
         projectSetupStatus.setText(message);
@@ -676,6 +699,13 @@ public class MainActivity extends Activity {
         if (projectTitle != null) projectTitle.setText(name);
         if (projectPathLabel != null) projectPathLabel.setText(path);
         if (metaLabel != null) metaLabel.setText(name);
+        updateChatContext();
+    }
+
+    private void updateChatContext() {
+        if (chatContextLabel != null) {
+            chatContextLabel.setText("Chat " + chatNumber + " · " + selectedProjectName);
+        }
     }
 
     private String joinTags(JSONArray tags) {
