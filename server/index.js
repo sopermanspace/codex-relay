@@ -36,6 +36,7 @@ const ignoredProjectDirs = new Set([
 ]);
 const makeToken = customAlphabet('123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz', 32);
 const remoteToken = process.env.REMOTE_TOKEN || makeToken();
+assertSafeRemoteToken(remoteToken, Boolean(process.env.REMOTE_TOKEN));
 const trustedProxy = process.env.TRUST_PROXY === 'true';
 const allowedRemoteOrigins = parseCsv(process.env.REMOTE_ALLOWED_ORIGINS);
 const maxFailedAuth = Number(process.env.REMOTE_MAX_FAILED_AUTH || 12);
@@ -80,7 +81,7 @@ app.get('/health', (req, res) => {
 app.get('/api/config', (req, res) => {
   res.json({
     appName: 'Codex Relay',
-    workdir: codexWorkdir,
+    workspaceLabel: 'Ready on this Mac',
     tokenRequired: true
   });
 });
@@ -94,8 +95,7 @@ app.get('/api/auth', (req, res) => {
 
   res.json({
     ok: true,
-    appName: 'Codex Relay',
-    workdir: codexWorkdir
+    appName: 'Codex Relay'
   });
 });
 
@@ -354,6 +354,25 @@ function isAuthorized(token) {
   const received = Buffer.from(token);
   if (expected.length !== received.length) return false;
   return crypto.timingSafeEqual(expected, received);
+}
+
+function assertSafeRemoteToken(value, isPersistent) {
+  const weakValues = new Set([
+    'change-me',
+    'change-me-to-a-long-random-token',
+    'password',
+    'token',
+    'secret'
+  ]);
+  if (typeof value !== 'string' || value.length < 32 || weakValues.has(value.trim().toLowerCase())) {
+    console.error('REMOTE_TOKEN must be a private random value with at least 32 characters.');
+    console.error('Run: npm run setup');
+    process.exit(1);
+  }
+
+  if (!isPersistent) {
+    console.warn('REMOTE_TOKEN is temporary for this run. Run `npm run setup` to create a persistent private token.');
+  }
 }
 
 function authorizeRequest(req, override = {}) {

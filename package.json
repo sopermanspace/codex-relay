@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Android-friendly Codex remote control app server.",
   "scripts": {
+    "setup": "node scripts/setup.mjs",
     "dev": "node --watch server/index.js",
     "start": "node server/index.js",
     "build:icons": "node scripts/build-icons.mjs",

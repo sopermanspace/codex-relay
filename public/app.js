@@ -66,8 +66,8 @@ endpoint.textContent = location.host || 'localhost';
 fetch('/api/config')
   .then((response) => response.json())
   .then((config) => {
-    workdirEl.textContent = config.workdir || 'Android control surface';
-    workspaceName.textContent = basename(config.workdir) || 'Codex workspace';
+    workdirEl.textContent = config.workspaceLabel || 'Private command center';
+    workspaceName.textContent = config.workspaceLabel || 'Ready on this Mac';
   })
   .catch(() => {
     workdirEl.textContent = 'Server unavailable';
@@ -225,11 +225,6 @@ function setConnecting(isConnecting) {
 function setFormError(message) {
   loginError.textContent = message;
   tokenInput.setAttribute('aria-invalid', message ? 'true' : 'false');
-}
-
-function basename(value) {
-  if (!value) return '';
-  return value.split('/').filter(Boolean).pop();
 }
 
 function debounce(fn, delay) {

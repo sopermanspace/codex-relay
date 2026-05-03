@@ -6,11 +6,11 @@ A native Android app plus a local app-server that lets you control Codex from yo
 
 ```bash
 npm install
-cp .env.example .env
+npm run setup
 npm start
 ```
 
-Keep this app-server running on your Mac. The native Android app connects to it through authenticated HTTP APIs.
+Keep this app-server running on your Mac. Setup creates a private persistent token, uses the current folder as the default Codex workspace, and prints the local URL your phone should use at home.
 
 ## Native Android App
 
@@ -46,14 +46,23 @@ npm run build:icons
 
 ## Use From Anywhere
 
-Expose this app-server only behind HTTPS and a private access layer. Two practical options:
+Use **Home network** in the Android app when your phone and Mac are on the same trusted Wi-Fi.
+
+Use **Away from home** only with an HTTPS tunnel or reverse proxy. Do not port-forward this server directly from your router. One practical setup:
 
 ```bash
 cloudflared tunnel --url http://localhost:8787
 ```
 
-or place it behind a reverse proxy with TLS and IP allowlisting. Set `PUBLIC_URL` in `.env` to the HTTPS URL so the server prints a scannable QR.
+Then set these in `.env`:
+
+```bash
+TRUST_PROXY=true
+PUBLIC_URL=https://your-secure-tunnel.example
+```
+
+Restart with `npm start`, then use the HTTPS URL in **Away from home** mode. A reverse proxy with TLS and IP allowlisting is also supported.
 
 ## Security Notes
 
-This controls a shell session on your Mac. Keep `REMOTE_TOKEN` long and private, use HTTPS, and avoid exposing the port directly to the internet.
+This controls a shell session on your Mac. Keep `REMOTE_TOKEN` long and private, use HTTPS for remote access, avoid direct internet exposure, and rotate the token by running `npm run setup` again if it is ever shared.
