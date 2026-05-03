@@ -1,0 +1,32 @@
+{
+  "name": "codex-android-remote",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Android-friendly Codex remote control app server.",
+  "scripts": {
+    "dev": "node --watch server/index.js",
+    "start": "node server/index.js",
+    "build:icons": "node scripts/build-icons.mjs",
+    "check": "node --check server/index.js"
+  },
+  "dependencies": {
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "nanoid": "^5.0.9",
+    "qrcode-terminal": "^0.12.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.5"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.5"
+  }
+}

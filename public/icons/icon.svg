@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="shell" x1="180" x2="844" y1="132" y2="892" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff"/>
+      <stop offset=".45" stop-color="#f4f4f5"/>
+      <stop offset="1" stop-color="#d4d4d8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="matrix(0 455 -455 0 500 372)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#a7f3d0"/>
+      <stop offset=".45" stop-color="#34d399"/>
+      <stop offset="1" stop-color="#059669"/>
+    </radialGradient>
+    <linearGradient id="cloud" x1="252" x2="754" y1="310" y2="728" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6ee7b7"/>
+      <stop offset=".48" stop-color="#10b981"/>
+      <stop offset="1" stop-color="#047857"/>
+    </linearGradient>
+    <filter id="outerShadow" x="48" y="44" width="928" height="936" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="42" flood-color="#000" flood-opacity=".28" stdDeviation="42"/>
+      <feDropShadow dx="0" dy="12" flood-color="#111827" flood-opacity=".18" stdDeviation="10"/>
+    </filter>
+    <filter id="softDepth" x="176" y="202" width="672" height="624" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="26" flood-color="#047857" flood-opacity=".32" stdDeviation="32"/>
+      <feDropShadow dx="0" dy="8" flood-color="#064e3b" flood-opacity=".22" stdDeviation="8"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" rx="226" fill="#09090b"/>
+  <g filter="url(#outerShadow)">
+    <rect width="760" height="760" x="132" y="132" rx="174" fill="url(#shell)"/>
+    <rect width="760" height="760" x="132" y="132" rx="174" fill="none" stroke="#fff" stroke-opacity=".88" stroke-width="3"/>
+  </g>
+  <g filter="url(#softDepth)">
+    <path fill="url(#cloud)" d="M360 674c-73 0-132-54-132-122 0-57 43-106 101-119 24-62 88-104 162-104 56 0 108 24 140 64 9-2 19-3 29-3 75 0 136 58 136 128s-61 128-136 128H516c-32 18-69 28-109 28h-47Z"/>
+    <path fill="url(#glow)" fill-opacity=".72" d="M311 486c19-76 88-132 171-132 61 0 115 31 146 77 13-5 27-8 42-8 56 0 102 43 102 96s-46 96-102 96H355c-54 0-97-39-97-88 0-42 31-78 73-87a160 160 0 0 0-20 46Z"/>
+    <path fill="#fff" fill-opacity=".22" d="M366 371c32-38 79-62 132-62 56 0 108 25 140 64 9-2 19-3 29-3 60 0 112 38 129 91-32-32-78-52-129-52-10 0-20 1-29 3-32-39-84-64-140-64-50 0-96 20-132 54-20 18-52-9-34-31Z"/>
+  </g>
+  <path fill="#fff" d="m384 541 52-48c9-8 23-8 31 1 8 9 7 22-2 31l-30 28 30 28c9 9 10 22 2 31-8 9-22 9-31 1l-52-48c-7-7-11-15-11-24Z"/>
+  <rect width="142" height="45" x="512" y="563" fill="#fff" rx="22.5"/>
+</svg>
