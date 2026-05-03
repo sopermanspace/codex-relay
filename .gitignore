@@ -6,3 +6,4 @@ npm-debug.log*
 android-native/.gradle/
 android-native/app/build/
 artifacts/
+screenshots/

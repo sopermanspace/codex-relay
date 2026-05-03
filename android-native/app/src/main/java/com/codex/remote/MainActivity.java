@@ -8,6 +8,7 @@ import android.content.SharedPreferences;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.RectF;
 import android.graphics.RadialGradient;
 import android.graphics.Shader;
 import android.graphics.Typeface;
@@ -18,12 +19,9 @@ import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
-import android.view.WindowInsets;
-import android.view.WindowInsetsController;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -42,8 +40,8 @@ import java.nio.charset.StandardCharsets;
 public class MainActivity extends Activity {
     private static final String PREFS = "codex_remote";
     private static final int BG = Color.rgb(6, 7, 10);
-    private static final int PANEL = Color.rgb(18, 19, 23);
-    private static final int PANEL_2 = Color.rgb(28, 29, 34);
+    private static final int PANEL = Color.rgb(15, 17, 22);
+    private static final int PANEL_2 = Color.rgb(24, 27, 33);
     private static final int TEXT = Color.rgb(250, 250, 250);
     private static final int MUTED = Color.rgb(190, 193, 201);
     private static final int SOFT = Color.rgb(132, 137, 148);
@@ -96,15 +94,9 @@ public class MainActivity extends Activity {
 
     private void configureWindow() {
         Window window = getWindow();
-        window.setStatusBarColor(Color.TRANSPARENT);
+        window.setStatusBarColor(BG);
         window.setNavigationBarColor(BG);
-        window.getDecorView().setSystemUiVisibility(
-            View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-        );
-        if (android.os.Build.VERSION.SDK_INT >= 30) {
-            WindowInsetsController controller = window.getInsetsController();
-            if (controller != null) controller.hide(WindowInsets.Type.statusBars());
-        }
+        window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
     }
 
     private void buildLayout() {
@@ -120,7 +112,7 @@ public class MainActivity extends Activity {
 
         shell = new LinearLayout(this);
         shell.setOrientation(LinearLayout.VERTICAL);
-        shell.setPadding(dp(20), dp(28), dp(20), dp(28));
+        shell.setPadding(dp(18), dp(22), dp(18), dp(26));
         scroll.addView(shell, new ScrollView.LayoutParams(
             ScrollView.LayoutParams.MATCH_PARENT,
             ScrollView.LayoutParams.WRAP_CONTENT
@@ -139,32 +131,35 @@ public class MainActivity extends Activity {
     private void buildConnectScreen() {
         connectScreen = new LinearLayout(this);
         connectScreen.setOrientation(LinearLayout.VERTICAL);
-        connectScreen.setGravity(Gravity.CENTER_HORIZONTAL);
         shell.addView(connectScreen, matchWrap());
 
-        ImageView hero = new ImageView(this);
-        hero.setImageResource(R.drawable.codex_operator_character);
-        hero.setAdjustViewBounds(true);
-        hero.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        LinearLayout.LayoutParams heroParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(280));
-        heroParams.topMargin = dp(4);
-        heroParams.bottomMargin = dp(10);
-        connectScreen.addView(hero, heroParams);
+        LinearLayout topBar = new LinearLayout(this);
+        topBar.setGravity(Gravity.CENTER_VERTICAL);
+        topBar.setOrientation(LinearLayout.HORIZONTAL);
+        connectScreen.addView(topBar, matchWrap());
 
-        TextView eyebrow = labelCaps("SECURE COMMAND CENTER");
-        connectScreen.addView(eyebrow, centerWrap());
+        topBar.addView(new CommandMarkView(this), new LinearLayout.LayoutParams(dp(56), dp(56)));
 
-        TextView title = heroTitle("Codex Relay");
-        title.setGravity(Gravity.CENTER);
+        LinearLayout brand = new LinearLayout(this);
+        brand.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams brandParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        brandParams.leftMargin = dp(14);
+        topBar.addView(brand, brandParams);
+
+        TextView eyebrow = labelCaps("CODEX RELAY");
+        brand.addView(eyebrow);
+        TextView title = heroTitle("Mobile command center");
         LinearLayout.LayoutParams titleParams = matchWrap();
-        titleParams.topMargin = dp(8);
-        connectScreen.addView(title, titleParams);
+        titleParams.topMargin = dp(4);
+        brand.addView(title, titleParams);
 
-        TextView subtitle = body("A private relay from your phone to the Codex agent on your Mac.");
-        subtitle.setGravity(Gravity.CENTER);
+        TextView live = chip("Native");
+        topBar.addView(live, new LinearLayout.LayoutParams(dp(88), dp(38)));
+
+        TextView subtitle = body("Connect your Android phone directly to the Codex app-server on your Mac.");
         LinearLayout.LayoutParams subtitleParams = matchWrap();
-        subtitleParams.topMargin = dp(8);
-        subtitleParams.bottomMargin = dp(24);
+        subtitleParams.topMargin = dp(22);
+        subtitleParams.bottomMargin = dp(18);
         connectScreen.addView(subtitle, subtitleParams);
 
         LinearLayout card = panel();
@@ -175,9 +170,9 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams chipsParams = matchWrap();
         chipsParams.bottomMargin = dp(14);
         card.addView(chips, chipsParams);
-        addMiniChip(chips, "Native");
+        addMiniChip(chips, "Secure");
         addMiniChip(chips, "Private");
-        addMiniChip(chips, "Direct API");
+        addMiniChip(chips, "Direct");
 
         card.addView(formLabel("Server URL"));
         serverInput = input(prefs.getString("server", getString(R.string.default_server_url)), false, "http://192.168.18.182:8787");
@@ -187,17 +182,24 @@ public class MainActivity extends Activity {
         tokenInput = input(prefs.getString("token", ""), true, "Paste token");
         card.addView(tokenInput, fieldParams());
 
-        unlockButton = primaryButton("Connect");
+        unlockButton = primaryButton("Connect to Codex");
         unlockButton.setOnClickListener(view -> connect());
         LinearLayout.LayoutParams unlockParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58));
         unlockParams.topMargin = dp(18);
         card.addView(unlockButton, unlockParams);
 
         connectionStatus = caption("Ready");
-        connectionStatus.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams statusParams = matchWrap();
-        statusParams.topMargin = dp(16);
+        statusParams.topMargin = dp(14);
         connectScreen.addView(connectionStatus, statusParams);
+
+        LinearLayout systemCard = miniPanel();
+        LinearLayout.LayoutParams systemParams = matchWrap();
+        systemParams.topMargin = dp(16);
+        connectScreen.addView(systemCard, systemParams);
+        systemCard.addView(metricRow("Transport", "HTTP command API"));
+        systemCard.addView(metricRow("Output", "Clean Codex result text"));
+        systemCard.addView(metricRow("Install", "Native Android APK"));
     }
 
     private void buildWorkspaceScreen() {
@@ -211,9 +213,7 @@ public class MainActivity extends Activity {
         header.setGravity(Gravity.CENTER_VERTICAL);
         workspaceScreen.addView(header, matchWrap());
 
-        ImageView appMark = new ImageView(this);
-        appMark.setImageResource(R.drawable.codex_remote_hero);
-        appMark.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        CommandMarkView appMark = new CommandMarkView(this);
         LinearLayout.LayoutParams markParams = new LinearLayout.LayoutParams(dp(48), dp(48));
         markParams.rightMargin = dp(12);
         header.addView(appMark, markParams);
@@ -221,7 +221,7 @@ public class MainActivity extends Activity {
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);
         header.addView(titles, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        titles.addView(sectionTitle("Relay Dashboard"));
+        titles.addView(sectionTitle("Codex Relay"));
         metaLabel = caption("Connected");
         titles.addView(metaLabel);
 
@@ -229,7 +229,7 @@ public class MainActivity extends Activity {
         close.setOnClickListener(view -> showConnect());
         header.addView(close, new LinearLayout.LayoutParams(dp(92), dp(48)));
 
-        LinearLayout statusCard = panel();
+        LinearLayout statusCard = miniPanel();
         LinearLayout.LayoutParams statusCardParams = matchWrap();
         statusCardParams.topMargin = dp(18);
         workspaceScreen.addView(statusCard, statusCardParams);
@@ -240,27 +240,27 @@ public class MainActivity extends Activity {
         statusCard.addView(statusRow, matchWrap());
         statusPill = chip("Online");
         statusRow.addView(statusPill, new LinearLayout.LayoutParams(dp(92), dp(36)));
-        TextView mode = caption("codex exec");
+        TextView mode = caption("Direct command API");
         LinearLayout.LayoutParams modeParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
         modeParams.leftMargin = dp(12);
         statusRow.addView(mode, modeParams);
-        TextView statusText = body("Send a task through the relay. Your Mac runs Codex and returns a readable result.");
+        TextView statusText = body("Send a task, get a clean response back from the Codex agent running on your Mac.");
         LinearLayout.LayoutParams statusTextParams = matchWrap();
         statusTextParams.topMargin = dp(12);
         statusCard.addView(statusText, statusTextParams);
 
-        TextView promptLabel = formLabel("Task");
+        TextView promptLabel = formLabel("Command");
         LinearLayout.LayoutParams promptLabelParams = matchWrap();
         promptLabelParams.topMargin = dp(20);
         workspaceScreen.addView(promptLabel, promptLabelParams);
 
-        promptInput = input("", false, "Example: Summarize the repo and list the next 3 improvements.");
+        promptInput = input("", false, "Ask Codex to inspect, edit, summarize, or run a task.");
         promptInput.setSingleLine(false);
         promptInput.setMinLines(4);
         promptInput.setGravity(Gravity.TOP | Gravity.START);
         workspaceScreen.addView(promptInput, tallFieldParams());
 
-        runButton = primaryButton("Run via Relay");
+        runButton = primaryButton("Send command");
         runButton.setOnClickListener(view -> runCommand());
         LinearLayout.LayoutParams runParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58));
         runParams.topMargin = dp(14);
@@ -281,7 +281,7 @@ public class MainActivity extends Activity {
         copyButton.setOnClickListener(view -> copyLastOutput());
         resultHeader.addView(copyButton, new LinearLayout.LayoutParams(dp(86), dp(42)));
 
-        resultBody = mono("No output yet. Your next result will appear here as clean text instead of broken terminal frames.");
+        resultBody = mono("No command has been sent yet.");
         LinearLayout.LayoutParams bodyParams = matchWrap();
         bodyParams.topMargin = dp(14);
         resultCard.addView(resultBody, bodyParams);
@@ -402,7 +402,7 @@ public class MainActivity extends Activity {
         workspaceScreen.setVisibility(View.VISIBLE);
         progressBar.setVisibility(View.GONE);
         metaLabel.setText(serverUrl.replace("http://", "").replace("https://", ""));
-        setResult("Result", "No output yet. Your next result will appear here as clean text instead of broken terminal frames.", false);
+        setResult("Result", "No command has been sent yet.", false);
     }
 
     private void showDemoDashboard() {
@@ -419,7 +419,7 @@ public class MainActivity extends Activity {
     private void setBusy(boolean busy) {
         progressBar.setVisibility(busy ? View.VISIBLE : View.GONE);
         runButton.setEnabled(!busy);
-        runButton.setText(busy ? "Running..." : "Run via Relay");
+        runButton.setText(busy ? "Running..." : "Send command");
         statusPill.setText(busy ? "Running" : "Online");
     }
 
@@ -451,21 +451,51 @@ public class MainActivity extends Activity {
     private LinearLayout panel() {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(18), dp(18), dp(18), dp(18));
-        panel.setBackground(rounded(PANEL, Color.argb(54, 250, 250, 250), 1, 24));
+        panel.setPadding(dp(16), dp(16), dp(16), dp(16));
+        panel.setBackground(rounded(PANEL, Color.argb(46, 250, 250, 250), 1, 22));
         return panel;
+    }
+
+    private LinearLayout miniPanel() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(14), dp(14), dp(14), dp(14));
+        panel.setBackground(rounded(Color.rgb(12, 14, 19), Color.argb(34, 250, 250, 250), 1, 20));
+        return panel;
+    }
+
+    private LinearLayout metricRow(String label, String value) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams rowParams = matchWrap();
+        rowParams.topMargin = dp(6);
+        rowParams.bottomMargin = dp(6);
+        row.setLayoutParams(rowParams);
+
+        TextView left = caption(label);
+        row.addView(left, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        TextView right = new TextView(this);
+        right.setText(value);
+        right.setTextColor(TEXT);
+        right.setTextSize(13);
+        right.setGravity(Gravity.END);
+        right.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        row.addView(right, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        return row;
     }
 
     private void addMiniChip(LinearLayout parent, String value) {
         TextView chip = new TextView(this);
         chip.setText(value);
         chip.setTextColor(Color.rgb(204, 251, 241));
-        chip.setTextSize(12);
+        chip.setTextSize(13);
         chip.setGravity(Gravity.CENTER);
         chip.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        chip.setBackground(rounded(Color.rgb(12, 45, 36), Color.argb(80, 52, 211, 153), 1, 16));
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(34), 1);
-        params.setMargins(dp(3), 0, dp(3), 0);
+        chip.setBackground(rounded(Color.rgb(8, 38, 31), Color.argb(74, 52, 211, 153), 1, 18));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(38), 1);
+        params.setMargins(dp(4), 0, dp(4), 0);
         parent.addView(chip, params);
     }
 
@@ -477,7 +507,7 @@ public class MainActivity extends Activity {
         input.setTextColor(TEXT);
         input.setHintTextColor(Color.rgb(102, 107, 118));
         input.setPadding(dp(16), 0, dp(16), 0);
-        input.setBackground(rounded(Color.rgb(3, 4, 6), Color.argb(48, 250, 250, 250), 1, 16));
+        input.setBackground(rounded(Color.rgb(4, 5, 8), Color.argb(54, 250, 250, 250), 1, 18));
         input.setSingleLine(!password);
         input.setInputType(password
             ? InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD
@@ -492,7 +522,7 @@ public class MainActivity extends Activity {
         button.setTextColor(Color.rgb(2, 18, 12));
         button.setTextSize(16);
         button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        button.setBackground(rounded(ACCENT, Color.argb(105, 255, 255, 255), 1, 18));
+        button.setBackground(rounded(ACCENT, Color.argb(120, 255, 255, 255), 1, 18));
         return button;
     }
 
@@ -537,7 +567,7 @@ public class MainActivity extends Activity {
 
     private TextView heroTitle(String value) {
         TextView text = title(value);
-        text.setTextSize(42);
+        text.setTextSize(30);
         return text;
     }
 
@@ -683,6 +713,54 @@ public class MainActivity extends Activity {
             canvas.drawCircle(width * 0.88f, height * 0.42f, width * 0.58f, paint);
 
             paint.setShader(null);
+        }
+    }
+
+    private final class CommandMarkView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF rect = new RectF();
+
+        CommandMarkView(Context context) {
+            super(context);
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float w = getWidth();
+            float h = getHeight();
+            float inset = Math.max(2f, w * 0.04f);
+
+            rect.set(inset, inset, w - inset, h - inset);
+            paint.setShader(new RadialGradient(
+                w * 0.28f,
+                h * 0.18f,
+                w * 0.8f,
+                new int[]{Color.rgb(27, 45, 39), Color.rgb(8, 10, 14)},
+                null,
+                Shader.TileMode.CLAMP
+            ));
+            canvas.drawRoundRect(rect, w * 0.26f, w * 0.26f, paint);
+
+            paint.setShader(null);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(Math.max(1f, w * 0.025f));
+            paint.setColor(Color.argb(150, 52, 211, 153));
+            canvas.drawRoundRect(rect, w * 0.26f, w * 0.26f, paint);
+
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeJoin(Paint.Join.ROUND);
+            paint.setStrokeWidth(w * 0.07f);
+            paint.setColor(Color.rgb(110, 231, 183));
+            float left = w * 0.33f;
+            float mid = w * 0.43f;
+            float right = w * 0.33f;
+            canvas.drawLine(left, h * 0.36f, mid, h * 0.5f, paint);
+            canvas.drawLine(mid, h * 0.5f, right, h * 0.64f, paint);
+            canvas.drawLine(w * 0.56f, h * 0.62f, w * 0.72f, h * 0.62f, paint);
+
+            paint.setStyle(Paint.Style.FILL);
         }
     }
 }
