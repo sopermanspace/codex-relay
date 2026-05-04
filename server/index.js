@@ -5,8 +5,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 import express from 'express';
 import { customAlphabet } from 'nanoid';
@@ -17,12 +18,15 @@ import { WebSocketServer } from 'ws';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const publicDir = path.join(rootDir, 'public');
+const execFileAsync = promisify(execFile);
 
 const host = process.env.HOST || '0.0.0.0';
 const port = Number(process.env.PORT || 8787);
 const codexCommand = process.env.CODEX_COMMAND || 'codex';
 const codexWorkdir = process.env.CODEX_WORKDIR || os.homedir();
 const projectRoots = getProjectRoots();
+const codexStateDbPath = process.env.CODEX_STATE_DB || path.join(os.homedir(), '.codex', 'state_5.sqlite');
+let desktopProjectPathCache = new Set();
 const ignoredProjectDirs = new Set([
   '.git',
   '.gradle',
@@ -55,6 +59,15 @@ const ignoredMentionExtensions = new Set([
   '.webp',
   '.zip'
 ]);
+const imageArtifactExtensions = new Set(['.avif', '.gif', '.jpeg', '.jpg', '.png', '.webp']);
+const imageContentTypes = new Map([
+  ['.avif', 'image/avif'],
+  ['.gif', 'image/gif'],
+  ['.jpeg', 'image/jpeg'],
+  ['.jpg', 'image/jpeg'],
+  ['.png', 'image/png'],
+  ['.webp', 'image/webp']
+]);
 const makeToken = customAlphabet('123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz', 32);
 const remoteToken = process.env.REMOTE_TOKEN || makeToken();
 assertSafeRemoteToken(remoteToken, Boolean(process.env.REMOTE_TOKEN));
@@ -63,7 +76,12 @@ const allowedRemoteOrigins = parseCsv(process.env.REMOTE_ALLOWED_ORIGINS);
 const maxFailedAuth = Number(process.env.REMOTE_MAX_FAILED_AUTH || 12);
 const failedAuthWindowMs = Number(process.env.REMOTE_AUTH_WINDOW_MS || 10 * 60 * 1000);
 const sessionTtlMs = Number(process.env.CODEX_SESSION_TTL_MS || 30 * 60 * 1000);
+const pairingCodeTtlMs = Number(process.env.REMOTE_PAIRING_CODE_TTL_MS || 10 * 60 * 1000);
+const deviceTokenTtlMs = Number(process.env.REMOTE_DEVICE_TOKEN_TTL_MS || 30 * 24 * 60 * 60 * 1000);
+const allowLegacyToken = process.env.REMOTE_ALLOW_LEGACY_TOKEN === 'true';
 const failedAuth = new Map();
+const pairedDevices = new Map();
+let activePairing = createPairingCode();
 
 const app = express();
 const server = http.createServer(app);
@@ -101,7 +119,7 @@ app.use((req, res, next) => {
   }
   next();
 });
-app.use(express.json({ limit: '64kb' }));
+app.use(express.json({ limit: process.env.REMOTE_JSON_LIMIT || '64mb' }));
 app.use('/vendor/xterm', express.static(path.join(rootDir, 'node_modules/@xterm/xterm'), { maxAge: '1h' }));
 app.use('/vendor/xterm-fit', express.static(path.join(rootDir, 'node_modules/@xterm/addon-fit'), { maxAge: '1h' }));
 app.use(express.static(publicDir, {
@@ -117,8 +135,65 @@ app.get('/api/config', (req, res) => {
   res.json({
     appName: 'Codex Relay',
     workspaceLabel: 'Ready on this Mac',
-    tokenRequired: true
+    pairingRequired: true,
+    pairingCodeLength: 8,
+    secureTransport: isSecureRequest(req),
+    localNetwork: isPrivateNetworkIp(getClientIp(req))
   });
+});
+
+app.post('/api/pair', (req, res) => {
+  const access = authorizePairingRequest(req);
+  if (!access.ok) {
+    res.status(access.status).json({ error: access.error });
+    return;
+  }
+
+  const code = normalizePairingCode(req.body?.code);
+  if (!isCurrentPairingCode(code)) {
+    noteFailedAuth(access.ip);
+    res.status(401).json({ error: 'Pairing code rejected. Check the code on your Mac and try again.' });
+    return;
+  }
+
+  const deviceToken = crypto.randomBytes(32).toString('base64url');
+  pairedDevices.set(hashSecret(deviceToken), {
+    createdAt: Date.now(),
+    lastSeenAt: Date.now(),
+    ip: access.ip,
+    userAgent: String(req.headers['user-agent'] || '').slice(0, 160)
+  });
+  clearFailedAuth(access.ip);
+  activePairing = createPairingCode();
+  logPairingCode('Next pairing code');
+
+  res.status(201).json({
+    ok: true,
+    token: deviceToken,
+    expiresAt: Date.now() + deviceTokenTtlMs
+  });
+});
+
+app.get('/api/artifact', async (req, res) => {
+  const access = authorizeRequest(req, {
+    token: typeof req.query?.token === 'string' ? req.query.token : undefined,
+    mode: req.headers['x-codex-access-mode']
+  });
+  if (!access.ok) {
+    res.status(access.status).json({ error: access.error });
+    return;
+  }
+
+  const artifactPath = resolveArtifactPath(req.query?.path);
+  if (!artifactPath) {
+    res.status(404).json({ error: 'Artifact not found.' });
+    return;
+  }
+
+  const extension = path.extname(artifactPath).toLowerCase();
+  res.setHeader('Content-Type', imageContentTypes.get(extension) || 'application/octet-stream');
+  res.setHeader('Cache-Control', 'private, max-age=300');
+  res.sendFile(artifactPath);
 });
 
 app.get('/api/slash-commands', (req, res) => {
@@ -167,6 +242,35 @@ app.get('/api/auth', (req, res) => {
     ok: true,
     appName: 'Codex Relay'
   });
+});
+
+app.post('/api/attachments', async (req, res) => {
+  const access = authorizeRequest(req);
+  if (!access.ok) {
+    res.status(access.status).json({ error: access.error });
+    return;
+  }
+
+  const images = Array.isArray(req.body?.images) ? req.body.images.slice(0, 6) : [];
+  if (images.length === 0) {
+    res.status(400).json({ error: 'Choose at least one image.' });
+    return;
+  }
+
+  try {
+    const uploadDir = path.join(codexWorkdir, '.codex-relay-uploads');
+    await fs.mkdir(uploadDir, { recursive: true });
+    const attachments = [];
+
+    for (const image of images) {
+      const attachment = await saveImageAttachment(image, uploadDir);
+      attachments.push(attachment);
+    }
+
+    res.status(201).json({ ok: true, attachments });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: error.message });
+  }
 });
 
 app.get('/api/projects', async (req, res) => {
@@ -335,6 +439,7 @@ app.post('/api/command', async (req, res) => {
       ok: result.exitCode === 0,
       exitCode: result.exitCode,
       output: result.output,
+      artifacts: result.artifacts,
       cwd,
       durationMs: Date.now() - startedAt
     });
@@ -410,7 +515,7 @@ server.listen(port, host, () => {
 
   console.log(`Codex Relay server listening on ${localUrl}`);
   console.log(`Workdir: ${codexWorkdir}`);
-  console.log(`Remote token: ${remoteToken}`);
+  logPairingCode('Pairing code');
 
   if (networkUrl) {
     console.log(`LAN URL: ${networkUrl}`);
@@ -425,6 +530,7 @@ server.listen(port, host, () => {
 });
 
 setInterval(cleanupSecurityState, 60_000).unref();
+setInterval(rotatePairingCodeIfExpired, 15_000).unref();
 
 function getBearerToken(req) {
   const auth = req.headers.authorization || '';
@@ -433,10 +539,23 @@ function getBearerToken(req) {
 
 function isAuthorized(token) {
   if (typeof token !== 'string' || token.length === 0) return false;
+  if (isAuthorizedDeviceToken(token)) return true;
+  if (!allowLegacyToken) return false;
   const expected = Buffer.from(remoteToken);
   const received = Buffer.from(token);
   if (expected.length !== received.length) return false;
   return crypto.timingSafeEqual(expected, received);
+}
+
+function isAuthorizedDeviceToken(token) {
+  const device = pairedDevices.get(hashSecret(token));
+  if (!device) return false;
+  if (Date.now() - device.createdAt > deviceTokenTtlMs) {
+    pairedDevices.delete(hashSecret(token));
+    return false;
+  }
+  device.lastSeenAt = Date.now();
+  return true;
 }
 
 function assertSafeRemoteToken(value, isPersistent) {
@@ -488,6 +607,26 @@ function authorizeRequest(req, override = {}) {
 
   clearFailedAuth(ip);
   return { ok: true, mode, ip };
+}
+
+function authorizePairingRequest(req) {
+  const ip = getClientIp(req);
+  if (isRateLimited(ip)) {
+    return { ok: false, status: 429, error: 'Too many pairing attempts. Wait, then use the newest code on your Mac.' };
+  }
+
+  const mode = normalizeAccessMode(req.headers['x-codex-access-mode']);
+  const isLocal = isPrivateNetworkIp(ip);
+  if ((mode === 'remote' || !isLocal) && !isSecureRequest(req)) {
+    return { ok: false, status: 403, error: 'Pairing over the internet requires HTTPS.' };
+  }
+
+  const origin = req.headers.origin;
+  if ((mode === 'remote' || !isLocal) && allowedRemoteOrigins.length > 0 && origin && !allowedRemoteOrigins.includes(origin)) {
+    return { ok: false, status: 403, error: 'Connection blocked.' };
+  }
+
+  return { ok: true, ip };
 }
 
 function normalizeAccessMode(value) {
@@ -554,6 +693,39 @@ function isRateLimited(ip) {
   return current.count >= maxFailedAuth;
 }
 
+function createPairingCode() {
+  return {
+    code: String(crypto.randomInt(0, 100_000_000)).padStart(8, '0'),
+    createdAt: Date.now()
+  };
+}
+
+function normalizePairingCode(value) {
+  return String(value || '').replace(/\D/g, '').slice(0, 8);
+}
+
+function isCurrentPairingCode(code) {
+  if (Date.now() - activePairing.createdAt > pairingCodeTtlMs) return false;
+  if (code.length !== activePairing.code.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(code), Buffer.from(activePairing.code));
+}
+
+function rotatePairingCodeIfExpired() {
+  if (Date.now() - activePairing.createdAt <= pairingCodeTtlMs) return;
+  activePairing = createPairingCode();
+  logPairingCode('New pairing code');
+}
+
+function hashSecret(value) {
+  return crypto.createHash('sha256').update(String(value)).digest('base64url');
+}
+
+function logPairingCode(label) {
+  const pretty = `${activePairing.code.slice(0, 4)} ${activePairing.code.slice(4)}`;
+  const minutes = Math.max(1, Math.round(pairingCodeTtlMs / 60_000));
+  console.log(`${label}: ${pretty} (expires in ${minutes} min, one-time use)`);
+}
+
 function isSessionExpired(session) {
   return Date.now() - session.createdAt > sessionTtlMs;
 }
@@ -571,6 +743,10 @@ function cleanupSecurityState() {
       client.close();
     }
     sessions.delete(id);
+  }
+
+  for (const [tokenHash, device] of pairedDevices) {
+    if (now - device.createdAt > deviceTokenTtlMs) pairedDevices.delete(tokenHash);
   }
 }
 
@@ -624,6 +800,17 @@ async function listProjects() {
   const entries = [];
   const seen = new Set();
 
+  const addProject = async (projectPath, overrides = {}) => {
+    const resolved = path.resolve(projectPath);
+    if (seen.has(resolved)) return;
+    seen.add(resolved);
+    const meta = await projectMeta(resolved);
+    if (overrides.source === 'codex' && !meta.tags.includes('Codex')) {
+      meta.tags = ['Codex', ...meta.tags];
+    }
+    entries.push({ ...meta, ...overrides });
+  };
+
   for (const root of projectRoots) {
     let children;
     try {
@@ -635,15 +822,93 @@ async function listProjects() {
     for (const child of children) {
       if (!child.isDirectory() || child.name.startsWith('.') || ignoredProjectDirs.has(child.name)) continue;
       const fullPath = path.join(root, child.name);
-      if (seen.has(fullPath)) continue;
-      seen.add(fullPath);
-      const meta = await projectMeta(fullPath);
-      entries.push(meta);
+      await addProject(fullPath, { source: 'folder' });
     }
+  }
+
+  for (const desktopProject of await listDesktopCodexProjects()) {
+    await addProject(desktopProject.path, {
+      source: 'codex',
+      threadCount: desktopProject.threadCount,
+      updatedAt: desktopProject.updatedAt
+    });
   }
 
   entries.sort((a, b) => b.updatedAt - a.updatedAt || a.name.localeCompare(b.name));
   return entries.slice(0, Number(process.env.CODEX_MAX_PROJECTS || 80));
+}
+
+async function listDesktopCodexProjects() {
+  if (!(await exists(codexStateDbPath))) {
+    desktopProjectPathCache = new Set();
+    return [];
+  }
+
+  const sql = `
+    select
+      cwd,
+      count(*) as threadCount,
+      max(coalesce(updated_at_ms, updated_at * 1000)) as updatedAt
+    from threads
+    where archived = 0
+      and cwd is not null
+      and cwd <> ''
+    group by cwd
+    order by updatedAt desc
+    limit ${Number(process.env.CODEX_DESKTOP_PROJECT_LIMIT || 200)}
+  `;
+
+  let rows = [];
+  try {
+    const { stdout } = await execFileAsync('sqlite3', ['-json', codexStateDbPath, sql], {
+      timeout: Number(process.env.CODEX_STATE_QUERY_TIMEOUT_MS || 3000),
+      maxBuffer: 1024 * 1024
+    });
+    rows = JSON.parse(stdout || '[]');
+  } catch (error) {
+    console.warn(`Unable to read Codex desktop project state: ${error.message}`);
+    return [];
+  }
+
+  const projects = [];
+  const syncedPaths = new Set();
+
+  for (const row of rows) {
+    const projectPath = typeof row.cwd === 'string' ? path.resolve(row.cwd) : '';
+    if (!shouldIncludeDesktopProject(projectPath)) continue;
+
+    try {
+      const stat = await fs.stat(projectPath);
+      if (!stat.isDirectory()) continue;
+    } catch {
+      continue;
+    }
+
+    syncedPaths.add(projectPath);
+    projects.push({
+      path: projectPath,
+      threadCount: Number(row.threadCount || 0),
+      updatedAt: Number(row.updatedAt || 0)
+    });
+  }
+
+  desktopProjectPathCache = syncedPaths;
+  return projects;
+}
+
+function shouldIncludeDesktopProject(projectPath) {
+  if (!projectPath) return false;
+  const base = path.basename(projectPath);
+  if (!base || base.startsWith('.') || ignoredProjectDirs.has(base)) return false;
+  if (projectPath === os.homedir()) return false;
+
+  const codexStateRoot = path.join(os.homedir(), '.codex');
+  const relativeToState = path.relative(codexStateRoot, projectPath);
+  if (relativeToState === '' || (!relativeToState.startsWith('..') && !path.isAbsolute(relativeToState))) {
+    return false;
+  }
+
+  return true;
 }
 
 async function projectMeta(projectPath) {
@@ -792,7 +1057,11 @@ function resolveRequestedCwd(value) {
 }
 
 function isAllowedProjectPath(candidate) {
-  return projectRoots.some((root) => {
+  return isPathInsideRoots(candidate, projectRoots) || isPathInsideRoots(candidate, [...desktopProjectPathCache]);
+}
+
+function isPathInsideRoots(candidate, roots) {
+  return roots.some((root) => {
     const relative = path.relative(root, candidate);
     return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
   });
@@ -802,6 +1071,7 @@ function runCodexExec(prompt, cwd = codexWorkdir) {
   return (async () => {
     const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-relay-'));
     const outputFile = path.join(outputDir, 'last-message.txt');
+    const imageSnapshot = await listImageArtifacts(cwd);
     const args = [
       'exec',
       '--sandbox',
@@ -813,7 +1083,7 @@ function runCodexExec(prompt, cwd = codexWorkdir) {
       '--skip-git-repo-check',
       '--output-last-message',
       outputFile,
-      prompt
+      buildCodexExecPrompt(prompt)
     ];
 
     return new Promise((resolve, reject) => {
@@ -862,14 +1132,197 @@ function runCodexExec(prompt, cwd = codexWorkdir) {
       } catch {
         if (!finalOutput && stderr.trim()) finalOutput = stderr.trim();
       }
+      const artifacts = await collectImageArtifacts(cwd, imageSnapshot, finalOutput);
       fs.rm(outputDir, { recursive: true, force: true }).catch(() => {});
       resolve({
         exitCode,
-        output: finalOutput
+        output: finalOutput,
+        artifacts
       });
     });
     });
   })();
+}
+
+function buildCodexExecPrompt(prompt) {
+  if (!looksLikeImageRequest(prompt)) return prompt;
+  return [
+    prompt,
+    '',
+    'Relay display requirement: save any generated or edited image as a PNG, JPG, WEBP, AVIF, or GIF file inside the current workspace, then include the saved file path in the final response. Do not report that the image is complete unless a viewable image file exists.'
+  ].join('\n');
+}
+
+function looksLikeImageRequest(prompt) {
+  return /\b(image|picture|photo|wallpaper|poster|logo|icon|avatar|mockup|illustration|banner|thumbnail|generate.*visual|create.*visual)\b/i.test(prompt);
+}
+
+async function collectImageArtifacts(cwd, previousImages, output) {
+  const previous = new Map(previousImages.map((item) => [item.path, item]));
+  const currentImages = await listImageArtifacts(cwd);
+  const discovered = new Map();
+
+  for (const item of currentImages) {
+    const before = previous.get(item.path);
+    if (!before || before.mtimeMs !== item.mtimeMs || before.size !== item.size) {
+      discovered.set(item.path, item);
+    }
+  }
+
+  for (const referencedPath of extractReferencedImagePaths(output, cwd)) {
+    const match = currentImages.find((item) => item.path === referencedPath);
+    if (match) discovered.set(match.path, match);
+  }
+
+  return [...discovered.values()]
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    .slice(0, 8)
+    .map((item) => ({
+      type: 'image',
+      name: path.basename(item.path),
+      path: item.path,
+      url: `/api/artifact?path=${encodeURIComponent(item.path)}`,
+      size: item.size
+    }));
+}
+
+async function listImageArtifacts(cwd) {
+  const root = path.resolve(cwd);
+  const results = [];
+  const maxVisited = Number(process.env.CODEX_ARTIFACT_SCAN_LIMIT || 2500);
+  let visited = 0;
+
+  async function walk(current) {
+    if (visited >= maxVisited) return;
+    let entries;
+    try {
+      entries = await fs.readdir(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (visited >= maxVisited) return;
+      if (entry.name.startsWith('.') || ignoredProjectDirs.has(entry.name)) continue;
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        await walk(fullPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      visited += 1;
+      if (!imageArtifactExtensions.has(path.extname(entry.name).toLowerCase())) continue;
+      try {
+        const stat = await fs.stat(fullPath);
+        results.push({
+          path: fullPath,
+          mtimeMs: stat.mtimeMs,
+          size: stat.size
+        });
+      } catch {
+        // Ignore files that disappear while scanning.
+      }
+    }
+  }
+
+  await walk(root);
+  return results;
+}
+
+function extractReferencedImagePaths(output, cwd) {
+  if (typeof output !== 'string' || output.trim() === '') return [];
+  const matches = new Set();
+  const patterns = [
+    /!\[[^\]]*]\(([^)]+)\)/g,
+    /(?:^|\s)(\/[^\s"'<>]+\.(?:avif|gif|jpe?g|png|webp))(?:\s|$)/gi,
+    /(?:^|\s)([^\s"'<>]+\.(?:avif|gif|jpe?g|png|webp))(?:\s|$)/gi
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of output.matchAll(pattern)) {
+      const rawPath = String(match[1] || '').replace(/^file:\/\//, '').trim();
+      const withoutFragment = rawPath.split('#')[0].split('?')[0];
+      const resolved = path.isAbsolute(withoutFragment)
+        ? path.resolve(withoutFragment)
+        : path.resolve(cwd, withoutFragment);
+      if (isAllowedProjectPath(resolved)) matches.add(resolved);
+    }
+  }
+
+  return [...matches];
+}
+
+function resolveArtifactPath(value) {
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  const resolved = path.resolve(value);
+  if (!isAllowedProjectPath(resolved)) return null;
+  const extension = path.extname(resolved).toLowerCase();
+  if (!imageArtifactExtensions.has(extension)) return null;
+  return resolved;
+}
+
+async function saveImageAttachment(image, uploadDir) {
+  if (!image || typeof image.data !== 'string') {
+    throw new Error('Attachment data is missing.');
+  }
+
+  const extension = imageExtensionForUpload(image);
+  if (!extension) {
+    throw new Error('Only PNG, JPEG, WebP, GIF, and AVIF images are supported.');
+  }
+
+  const base64 = image.data.includes(',')
+    ? image.data.slice(image.data.indexOf(',') + 1)
+    : image.data;
+  if (!/^[a-zA-Z0-9+/=\s]+$/.test(base64)) {
+    throw new Error('Image data is invalid.');
+  }
+
+  const buffer = Buffer.from(base64.replace(/\s/g, ''), 'base64');
+  const maxBytes = Number(process.env.CODEX_ATTACHMENT_MAX_BYTES || 10 * 1024 * 1024);
+  if (buffer.length === 0 || buffer.length > maxBytes) {
+    throw new Error('Each image must be smaller than 10 MB.');
+  }
+
+  const originalName = typeof image.name === 'string' ? image.name : 'image';
+  const safeBase = path.basename(originalName, path.extname(originalName))
+    .replace(/[^\w.-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'image';
+  const fileName = `${Date.now()}-${makeToken().slice(0, 8)}-${safeBase}${extension}`;
+  const targetPath = path.join(uploadDir, fileName);
+
+  if (!isAllowedProjectPath(targetPath)) {
+    throw new Error('Attachment folder is outside the allowed workspace.');
+  }
+
+  await fs.writeFile(targetPath, buffer);
+  return {
+    name: `${safeBase}${extension}`,
+    path: targetPath,
+    size: buffer.length,
+    type: imageContentTypes.get(extension)
+  };
+}
+
+function imageExtensionForUpload(image) {
+  const fromName = path.extname(String(image.name || '')).toLowerCase();
+  if (imageArtifactExtensions.has(fromName)) return fromName;
+
+  const type = String(image.type || '').toLowerCase();
+  for (const [extension, contentType] of imageContentTypes) {
+    if (contentType === type) return extension;
+  }
+
+  const dataMatch = String(image.data || '').match(/^data:(image\/[a-z0-9.+-]+);base64,/i);
+  if (dataMatch) {
+    const contentType = dataMatch[1].toLowerCase();
+    for (const [extension, mappedType] of imageContentTypes) {
+      if (mappedType === contentType) return extension;
+    }
+  }
+
+  return '';
 }
 
 function resolveSlashCommand(prompt) {

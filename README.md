@@ -10,7 +10,7 @@ npm run setup
 npm start
 ```
 
-Keep this app-server running on your Mac. Setup creates a private persistent token, uses the current folder as the default Codex workspace, and prints the local URL your phone should use at home.
+Keep this app-server running on your Mac. Setup prepares the local server, uses the current folder as the default Codex workspace, and prints the local URL your phone should use at home. When the server starts, it prints a short one-time pairing code for your phone.
 
 ## Native Android App
 
@@ -65,4 +65,4 @@ Restart with `npm start`, then use the HTTPS URL in **Away from home** mode. A r
 
 ## Security Notes
 
-This controls a shell session on your Mac. Keep `REMOTE_TOKEN` long and private, use HTTPS for remote access, avoid direct internet exposure, and rotate the token by running `npm run setup` again if it is ever shared.
+This controls a shell session on your Mac. Pairing codes are one-time, short-lived, rate-limited, and exchanged for a random device key stored on the phone. Use HTTPS for remote access, avoid direct internet exposure, and prefer a trusted tunnel or reverse proxy. A pairing code replaces the old mobile token entry, but it does not replace the need for a reachable LAN URL or HTTPS tunnel URL.

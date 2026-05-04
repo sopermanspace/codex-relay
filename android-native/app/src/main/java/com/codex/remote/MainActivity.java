@@ -13,6 +13,8 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.RadialGradient;
@@ -31,6 +33,7 @@ import android.view.Window;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -66,7 +69,7 @@ public class MainActivity extends Activity {
     private LinearLayout connectScreen;
     private LinearLayout workspaceScreen;
     private EditText serverInput;
-    private EditText tokenInput;
+    private EditText pairingCodeInput;
     private EditText promptInput;
     private TextView statusPill;
     private TextView connectionStatus;
@@ -246,9 +249,10 @@ public class MainActivity extends Activity {
         serverInput = input(savedServer, false, getString(R.string.default_server_url));
         connectScreen.addView(serverInput, fieldParams());
 
-        connectScreen.addView(formLabel("Remote token"));
-        tokenInput = input(prefs.getString("token", ""), true, "Paste token");
-        connectScreen.addView(tokenInput, fieldParams());
+        connectScreen.addView(formLabel("Pairing code"));
+        pairingCodeInput = input("", false, "0000 0000");
+        pairingCodeInput.setInputType(InputType.TYPE_CLASS_NUMBER);
+        connectScreen.addView(pairingCodeInput, fieldParams());
 
         unlockButton = primaryButton("Connect to Codex");
         unlockButton.setOnClickListener(view -> connect());
@@ -470,28 +474,37 @@ public class MainActivity extends Activity {
 
     private void connect() {
         String nextServer = serverInput.getText().toString().trim();
-        String nextToken = tokenInput.getText().toString().trim();
+        String pairingCode = pairingCodeInput.getText().toString().replaceAll("\\D", "");
         if (!isValidHttpUrl(nextServer)) {
             setConnectStatus("Enter a valid HTTP or HTTPS URL.", true);
             return;
         }
-        if (nextToken.isEmpty()) {
-            setConnectStatus("Remote token is required.", true);
+        String savedToken = prefs.getString("device_token", "");
+        if (pairingCode.isEmpty() && savedToken.isEmpty()) {
+            setConnectStatus("Enter the 8-digit pairing code shown on your Mac.", true);
+            return;
+        }
+        if (!pairingCode.isEmpty() && pairingCode.length() != 8) {
+            setConnectStatus("Pairing code must be 8 digits.", true);
             return;
         }
 
         serverUrl = trimSlash(nextServer);
-        token = nextToken;
+        token = savedToken;
         progressBar.setVisibility(View.VISIBLE);
         unlockButton.setEnabled(false);
-        setConnectStatus("Checking secure connection...", false);
+        setConnectStatus(pairingCode.isEmpty() ? "Checking paired device..." : "Pairing device...", false);
 
         new Thread(() -> {
             try {
+                if (!pairingCode.isEmpty()) {
+                    token = pairDevice(pairingCode);
+                }
                 verifyAuth();
                 prefs.edit()
                     .putString("server", serverUrl)
-                    .putString("token", token)
+                    .putString("device_token", token)
+                    .remove("token")
                     .putString("access_mode", accessMode)
                     .apply();
                 runOnUiThread(this::showWorkspace);
@@ -526,13 +539,20 @@ public class MainActivity extends Activity {
                 long seconds = Math.max(1, (System.currentTimeMillis() - started) / 1000);
                 boolean ok = response.optBoolean("ok", false);
                 String output = response.optString("output", "");
-                if (output.trim().isEmpty()) output = ok ? "Done." : "No output returned.";
+                JSONArray artifacts = response.optJSONArray("artifacts");
+                int artifactCount = artifacts == null ? 0 : artifacts.length();
+                if (output.trim().isEmpty()) {
+                    output = ok && artifactCount > 0
+                        ? "Image ready."
+                        : "Finished, but no visible result came back.";
+                }
                 final String resultTitleText = ok ? "Completed in " + seconds + "s" : "Finished with exit code " + response.optInt("exitCode", -1);
                 final String resultOutputText = output;
+                final JSONArray resultArtifacts = artifacts == null ? new JSONArray() : artifacts;
                 runOnUiThread(() -> {
                     removeLastAssistantPlaceholder();
-                    addMessageBubble(resultOutputText, false, !ok);
-                    setResult(resultTitleText, resultOutputText, !ok);
+                    addAssistantResult(resultOutputText, resultArtifacts, !ok);
+                    setResult(resultTitleText, buildResultSummary(resultOutputText, resultArtifacts), !ok);
                     notifyTaskDone(resultTitleText, ok ? "Codex finished on your Mac." : "Codex needs attention.");
                 });
             } catch (Exception error) {
@@ -567,7 +587,7 @@ public class MainActivity extends Activity {
 
         int status = connection.getResponseCode();
         String response = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
-        if (status == 401) throw new Exception("Token rejected.");
+        if (status == 401) throw new Exception("Device is not paired. Enter the newest code from your Mac.");
         if (status < 200 || status >= 300) {
             String message = response.trim().isEmpty() ? "Server returned " + status + "." : response;
             throw new Exception(message);
@@ -583,10 +603,42 @@ public class MainActivity extends Activity {
         connection.setReadTimeout(10000);
         setAccessHeaders(connection);
         int status = connection.getResponseCode();
-        if (status == 401) throw new Exception("Token rejected.");
+        if (status == 401) throw new Exception("Device is not paired. Enter the newest code from your Mac.");
         if (status < 200 || status >= 300) throw new Exception("Server returned " + status + ".");
         JSONObject response = new JSONObject(readAll(connection.getInputStream()));
         if (!response.optBoolean("ok", false)) throw new Exception("Server did not confirm access.");
+    }
+
+    private String pairDevice(String pairingCode) throws Exception {
+        URL url = new URL(serverUrl + "/api/pair");
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("POST");
+        connection.setConnectTimeout(10000);
+        connection.setReadTimeout(10000);
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Content-Type", "application/json");
+        connection.setRequestProperty("X-Codex-Access-Mode", accessMode);
+
+        JSONObject body = new JSONObject();
+        body.put("code", pairingCode);
+        byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
+        try (OutputStream out = connection.getOutputStream()) {
+            out.write(payload);
+        }
+
+        int status = connection.getResponseCode();
+        String responseText = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
+        if (status == 401) throw new Exception("Pairing code rejected. Check the newest code on your Mac.");
+        if (status == 403) throw new Exception("Pairing over the internet requires HTTPS.");
+        if (status < 200 || status >= 300) {
+            String message = responseText.trim().isEmpty() ? "Server returned " + status + "." : responseText;
+            throw new Exception(message);
+        }
+
+        JSONObject response = new JSONObject(responseText);
+        String nextToken = response.optString("token", "");
+        if (nextToken.trim().isEmpty()) throw new Exception("Server did not return a device key.");
+        return nextToken;
     }
 
     private void loadProjects() {
@@ -612,7 +664,7 @@ public class MainActivity extends Activity {
         setAccessHeaders(connection);
         int status = connection.getResponseCode();
         String response = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
-        if (status == 401) throw new Exception("Token rejected.");
+        if (status == 401) throw new Exception("Device pairing expired. Pair again from the Mac.");
         if (status < 200 || status >= 300) throw new Exception(response.trim().isEmpty() ? "Server returned " + status + "." : response);
         JSONObject object = new JSONObject(response);
         return object.optJSONArray("projects") == null ? new JSONArray() : object.optJSONArray("projects");
@@ -662,7 +714,7 @@ public class MainActivity extends Activity {
 
         int status = connection.getResponseCode();
         String response = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
-        if (status == 401) throw new Exception("Token rejected.");
+        if (status == 401) throw new Exception("Device pairing expired. Pair again from the Mac.");
         if (status < 200 || status >= 300) throw new Exception(response.trim().isEmpty() ? "Server returned " + status + "." : response);
         JSONObject object = new JSONObject(response);
         return object.optJSONObject("project") == null ? new JSONObject() : object.optJSONObject("project");
@@ -752,7 +804,7 @@ public class MainActivity extends Activity {
                 : "Home only blocks connections outside your trusted Wi-Fi.");
         }
         if (accessModeHint != null) {
-            accessModeHint.setText("Use your home Wi-Fi URL here. If you are away, use your secure link.");
+            accessModeHint.setText("Use your Mac URL once, then enter the one-time pairing code shown on your Mac.");
         }
     }
 
@@ -803,6 +855,92 @@ public class MainActivity extends Activity {
         bubbleParams.topMargin = dp(chatList.getChildCount() == 0 ? 0 : 12);
         row.addView(bubble, bubbleParams);
         chatList.addView(row, matchWrap());
+    }
+
+    private void addAssistantResult(String message, JSONArray artifacts, boolean error) {
+        String trimmed = message == null ? "" : message.trim();
+        if (!trimmed.isEmpty()) {
+            addMessageBubble(trimmed, false, error);
+        }
+
+        if (artifacts == null) return;
+        for (int index = 0; index < artifacts.length(); index++) {
+            JSONObject artifact = artifacts.optJSONObject(index);
+            if (artifact == null || !"image".equals(artifact.optString("type"))) continue;
+            addImageBubble(artifact);
+        }
+    }
+
+    private void addImageBubble(JSONObject artifact) {
+        if (chatList == null) return;
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.START);
+
+        LinearLayout bubble = new LinearLayout(this);
+        bubble.setOrientation(LinearLayout.VERTICAL);
+        bubble.setPadding(dp(8), dp(8), dp(8), dp(10));
+        bubble.setBackground(rounded(Color.rgb(14, 16, 21), Color.argb(42, 250, 250, 250), 1, 22));
+
+        ImageView preview = new ImageView(this);
+        preview.setAdjustViewBounds(true);
+        preview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        preview.setContentDescription("Generated image preview");
+        preview.setBackground(rounded(Color.rgb(5, 7, 10), Color.argb(38, 250, 250, 250), 1, 16));
+        int maxWidth = getResources().getDisplayMetrics().widthPixels - dp(108);
+        LinearLayout.LayoutParams imageParams = new LinearLayout.LayoutParams(maxWidth, dp(260));
+        bubble.addView(preview, imageParams);
+
+        String name = artifact.optString("name", "Generated image");
+        TextView caption = caption(name);
+        caption.setTextColor(MUTED);
+        LinearLayout.LayoutParams captionParams = matchWrap();
+        captionParams.topMargin = dp(10);
+        bubble.addView(caption, captionParams);
+
+        LinearLayout.LayoutParams bubbleParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        bubbleParams.topMargin = dp(chatList.getChildCount() == 0 ? 0 : 12);
+        row.addView(bubble, bubbleParams);
+        chatList.addView(row, matchWrap());
+
+        loadArtifactImage(artifact.optString("url", ""), preview);
+    }
+
+    private void loadArtifactImage(String relativeUrl, ImageView target) {
+        if (relativeUrl.trim().isEmpty()) return;
+        new Thread(() -> {
+            try {
+                URL url = new URL(serverUrl + relativeUrl);
+                HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                connection.setRequestMethod("GET");
+                connection.setConnectTimeout(10000);
+                connection.setReadTimeout(30000);
+                setAccessHeaders(connection);
+                int status = connection.getResponseCode();
+                if (status < 200 || status >= 300) throw new Exception("Image unavailable.");
+                Bitmap bitmap = BitmapFactory.decodeStream(connection.getInputStream());
+                if (bitmap == null) throw new Exception("Image unavailable.");
+                runOnUiThread(() -> target.setImageBitmap(bitmap));
+            } catch (Exception error) {
+                runOnUiThread(() -> target.setContentDescription("Generated image could not be loaded"));
+            }
+        }).start();
+    }
+
+    private String buildResultSummary(String output, JSONArray artifacts) {
+        StringBuilder summary = new StringBuilder(output == null ? "" : output.trim());
+        if (artifacts != null && artifacts.length() > 0) {
+            if (summary.length() > 0) summary.append("\n\n");
+            summary.append("Artifacts:");
+            for (int index = 0; index < artifacts.length(); index++) {
+                JSONObject artifact = artifacts.optJSONObject(index);
+                if (artifact == null) continue;
+                summary.append("\n- ").append(artifact.optString("name", "Generated image"));
+            }
+        }
+        return summary.toString();
     }
 
     private void removeLastAssistantPlaceholder() {
@@ -974,7 +1112,7 @@ public class MainActivity extends Activity {
         setAccessHeaders(connection);
         int status = connection.getResponseCode();
         String response = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
-        if (status == 401) throw new Exception("Token rejected.");
+        if (status == 401) throw new Exception("Device pairing expired. Pair again from the Mac.");
         if (status < 200 || status >= 300) throw new Exception(response.trim().isEmpty() ? "Server returned " + status + "." : response);
         JSONObject object = new JSONObject(response);
         return object.optJSONArray("mentions") == null ? new JSONArray() : object.optJSONArray("mentions");
@@ -1044,7 +1182,7 @@ public class MainActivity extends Activity {
         setAccessHeaders(connection);
         int status = connection.getResponseCode();
         String response = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
-        if (status == 401) throw new Exception("Token rejected.");
+        if (status == 401) throw new Exception("Device pairing expired. Pair again from the Mac.");
         if (status < 200 || status >= 300) throw new Exception(response.trim().isEmpty() ? "Server returned " + status + "." : response);
         JSONObject object = new JSONObject(response);
         return object.optJSONArray("commands") == null ? defaultSlashCommands() : object.optJSONArray("commands");

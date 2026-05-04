@@ -5,7 +5,7 @@ Native Android client for the Codex app-server. This is not a browser install fl
 ## What It Does
 
 - Creates Codex sessions through the app-server HTTP API.
-- Uses a native connection screen for the server URL and remote token.
+- Uses a native connection screen for the server URL and one-time pairing code.
 - Verifies access through the app-server auth API.
 - Sends tasks through the app-server command API.
 - Renders Codex results in native Android views.
@@ -49,3 +49,5 @@ http://192.168.18.182:8787
 ```
 
 For “from anywhere,” use an HTTPS tunnel URL such as Cloudflare Tunnel.
+
+When the app-server starts, it prints an 8-digit pairing code. Enter that code once on Android; the server exchanges it for a random device key and stores only that paired-device credential on the phone.

@@ -12,89 +12,177 @@
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
-    <link rel="stylesheet" href="/vendor/xterm/css/xterm.css">
-    <link rel="stylesheet" href="/styles.css?v=9">
+    <link rel="stylesheet" href="/styles.css?v=14">
   </head>
   <body>
     <div class="shell">
       <header class="topbar">
-        <nav class="brand" aria-label="Codex Relay">
-          <img class="mark" src="/brand/codex-remote-logo.svg" alt="" aria-hidden="true">
-          <span>
-            <strong>Codex Relay</strong>
-            <small id="workdir">Private command center</small>
-          </span>
+        <button class="round-button" id="sidebarButton" type="button" aria-label="Open projects sidebar">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 7h16M4 17h16" />
+          </svg>
+        </button>
+
+        <div class="status-pill" id="status" role="status">Locked</div>
+
+        <nav class="top-actions" aria-label="Session controls">
+          <button class="action-button" id="projectsButton" type="button" aria-label="Open projects">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H10l2 2h5.5A2.5 2.5 0 0 1 20 9.5v7A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5z" />
+            </svg>
+          </button>
+          <button class="action-button hidden" id="clearButton" type="button" aria-label="New chat">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+          <details class="more-menu">
+            <summary aria-label="More settings">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 5.5h.01M12 12h.01M12 18.5h.01" />
+              </svg>
+            </summary>
+            <div class="menu-popover">
+              <p id="workdir">Private command center</p>
+              <button id="menuProjectsButton" type="button">Projects</button>
+              <button id="notifyButton" type="button">Notifications</button>
+              <button id="interruptButton" type="button">Stop task</button>
+              <div class="quick-keys" aria-label="Terminal shortcuts">
+                <button class="key-button" type="button" data-key="escape">Esc</button>
+                <button class="key-button" type="button" data-key="tab">Tab</button>
+                <button class="key-button" type="button" data-key="up">Up</button>
+                <button class="key-button" type="button" data-key="down">Down</button>
+              </div>
+            </div>
+          </details>
         </nav>
-        <div class="status" id="status" role="status">Locked</div>
       </header>
+
+      <aside class="project-drawer" id="projectDrawer" aria-hidden="true" aria-labelledby="projectDrawerTitle">
+        <button class="drawer-scrim" id="projectScrim" type="button" aria-label="Close projects"></button>
+        <section class="drawer-panel" role="dialog" aria-modal="true" tabindex="-1">
+          <header class="drawer-head">
+            <div>
+              <p>Workspace</p>
+              <h2 id="projectDrawerTitle">Codex projects</h2>
+            </div>
+            <button class="drawer-close" id="closeProjectsButton" type="button" aria-label="Close projects">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </header>
+          <div class="project-list" id="projectList" aria-live="polite"></div>
+        </section>
+      </aside>
 
       <main class="workspace">
         <section class="access" id="accessPanel" aria-labelledby="accessTitle">
-          <article class="unlock-panel">
-            <div class="unlock-head">
-              <img class="hero-logo" src="/brand/codex-remote-logo.svg" alt="Codex Relay logo">
-              <div class="access-copy">
-                <p class="eyebrow">Private app-server</p>
-                <h1 id="accessTitle">Connect to Codex</h1>
-                <p>Open a live terminal on this Mac.</p>
-              </div>
+          <div class="phone-status" aria-hidden="true">
+            <span>9:41</span>
+            <div class="phone-indicators">
+              <span class="cell-bars"></span>
+              <span class="wifi-icon"></span>
+              <span class="battery-pill">100</span>
             </div>
+          </div>
 
-            <dl class="connection-summary" aria-label="Connection details">
-              <div>
-                <dt>Server</dt>
-                <dd id="endpoint">localhost:8787</dd>
+          <article class="unlock-panel">
+            <header class="unlock-head">
+              <div class="hero-logo" aria-hidden="true">
+                <svg viewBox="0 0 64 64">
+                  <path d="m25 20 10 12-10 12" />
+                  <path d="M39 40h10" />
+                </svg>
               </div>
-              <div>
-                <dt>Workspace</dt>
-                <dd id="workspaceName">Loading</dd>
+              <div class="access-copy">
+                <h1 id="accessTitle">Codex Relay</h1>
+                <p>Connect to your Codex server running on a Mac.</p>
               </div>
-            </dl>
+            </header>
 
             <form class="login" id="loginForm">
-              <label for="token">Remote token</label>
-              <div class="token-row">
-                <input id="token" name="token" type="password" autocomplete="current-password" placeholder="Paste token" required>
-                <button class="primary" id="connectButton" type="submit">Unlock</button>
+              <div class="field-stack">
+                <label class="relay-field pairing-field" for="pairingCode">
+                  <span>Pairing code</span>
+                  <span class="field-control">
+                    <input id="pairingCode" name="pairingCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="9" pattern="[0-9 ]{8,9}" placeholder="0000 0000" required>
+                    <button class="field-icon" id="clearPairingButton" type="button" aria-label="Clear pairing code">
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M18 6 6 18M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </span>
+                </label>
+                <p class="field-hint">Enter the one-time code shown on your Mac. It expires quickly and can be used once.</p>
               </div>
+
+              <button class="primary" id="connectButton" type="submit">
+                <span>Connect to Codex</span>
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 12h14M13 6l6 6-6 6" />
+                </svg>
+              </button>
+
               <p class="form-message" id="loginError" role="alert"></p>
             </form>
+
+            <footer class="tips-row">
+              <span></span>
+              <button class="tips-button" type="button" aria-label="Open connection tips">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M9.1 9a3 3 0 1 1 4.9 2.3c-1.1.7-2 1.4-2 2.7" />
+                  <path d="M12 17h.01" />
+                  <circle cx="12" cy="12" r="10" />
+                </svg>
+                <span>Connection tips</span>
+              </button>
+              <span></span>
+            </footer>
+
+            <span class="sr-only" id="workspaceName">Loading</span>
           </article>
         </section>
 
-        <section class="remote hidden" id="remotePanel" aria-label="Codex terminal">
-          <div class="terminal-wrap">
-            <div class="terminal-head">
-              <span id="sessionLabel">No session</span>
-              <button class="icon-button" id="clearButton" type="button" aria-label="Clear terminal">⌫</button>
-            </div>
-            <div class="terminal skeleton" id="terminal" tabindex="0" aria-live="polite"></div>
-          </div>
+        <section class="remote hidden" id="remotePanel" aria-label="Codex chat">
+          <section class="chat-log" id="chatLog" aria-label="Conversation" aria-live="polite">
+            <article class="empty-state" id="emptyState">
+              <h1>Today’s work</h1>
+              <p>Ask for edits, checks, explanations, or project help.</p>
+            </article>
+          </section>
 
           <form class="composer" id="composer">
-            <label for="prompt">Command</label>
-            <div class="quick-keys" aria-label="Terminal shortcuts">
-              <button class="key-button" type="button" data-key="escape">Esc</button>
-              <button class="key-button" type="button" data-key="tab">Tab</button>
-              <button class="key-button" type="button" data-key="up">↑</button>
-              <button class="key-button" type="button" data-key="down">↓</button>
-            </div>
-            <textarea id="prompt" rows="3" placeholder="Ask Codex to edit, run, explain, or debug..."></textarea>
+            <div class="attachment-tray hidden" id="attachmentTray" aria-label="Attached images"></div>
+            <input class="sr-only" id="imageInput" type="file" accept="image/*" multiple>
+            <label class="sr-only" for="prompt">Message</label>
+            <button class="composer-icon" id="attachButton" type="button" aria-label="Attach images">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+            <textarea id="prompt" rows="1" placeholder="Message Codex..."></textarea>
+            <button class="composer-icon subtle" type="button" aria-label="Voice input">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 4a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V7a3 3 0 0 0-3-3Z" />
+                <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+              </svg>
+            </button>
+            <button class="send-button" type="submit" aria-label="Send message">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 12h14M13 6l6 6-6 6" />
+              </svg>
+            </button>
             <section class="slash-panel hidden" id="slashPanel" aria-label="Command and mention suggestions">
               <div class="slash-panel-head">
                 <span id="paletteTitle">Slash commands</span>
-                <button class="icon-button compact" id="notifyButton" type="button" aria-label="Enable completion notifications">◎</button>
               </div>
               <div class="slash-list" id="slashList" role="listbox"></div>
             </section>
-            <div class="actions">
-              <button class="secondary" id="interruptButton" type="button">Ctrl+C</button>
-              <button class="primary" type="submit">Send</button>
-            </div>
           </form>
         </section>
       </main>
     </div>
-    <script src="/app.js?v=9" type="module"></script>
+    <script src="/app.js?v=14" type="module"></script>
   </body>
 </html>
