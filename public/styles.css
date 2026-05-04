@@ -635,8 +635,13 @@ h1 {
 }
 
 .pairing-request {
+  position: fixed;
+  z-index: 60;
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: max(1rem, env(safe-area-inset-bottom));
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
+  width: min(calc(100vw - 2rem), 25rem);
   gap: 1rem;
   align-items: center;
   padding: 1.2rem;

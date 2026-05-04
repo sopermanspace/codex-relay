@@ -273,7 +273,6 @@ async function pairDevice() {
 }
 
 async function pollPairingRequest() {
-  if (shell.classList.contains('is-unlocked')) return;
   let payload;
   try {
     const response = await fetch('/api/pairing/request');
