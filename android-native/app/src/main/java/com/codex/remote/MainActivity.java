@@ -124,6 +124,7 @@ public class MainActivity extends Activity {
             showDemoDashboard();
         } else {
             showConnect();
+            autoConnectSavedDevice();
         }
     }
 
@@ -230,14 +231,14 @@ public class MainActivity extends Activity {
         eyebrowParams.topMargin = dp(26);
         connectScreen.addView(eyebrow, eyebrowParams);
 
-        TextView subtitle = body("Native Android control for the Codex app-server on your Mac.");
+        TextView subtitle = body("Pair once with your Mac, then reconnect automatically.");
         subtitle.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams subtitleParams = matchWrap();
         subtitleParams.topMargin = dp(14);
         subtitleParams.bottomMargin = dp(32);
         connectScreen.addView(subtitle, subtitleParams);
 
-        accessModeHint = caption("Use your home Wi-Fi URL here. If you are away, use your secure link.");
+        accessModeHint = caption("First setup: enter your Mac URL and the 8-digit code shown on your Mac.");
         accessModeHint.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams modeHintParams = matchWrap();
         modeHintParams.bottomMargin = dp(18);
@@ -254,7 +255,7 @@ public class MainActivity extends Activity {
         pairingCodeInput.setInputType(InputType.TYPE_CLASS_NUMBER);
         connectScreen.addView(pairingCodeInput, fieldParams());
 
-        unlockButton = primaryButton("Connect to Codex");
+        unlockButton = primaryButton("Pair / Connect");
         unlockButton.setOnClickListener(view -> connect());
         LinearLayout.LayoutParams unlockParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58));
         unlockParams.topMargin = dp(24);
@@ -510,6 +511,38 @@ public class MainActivity extends Activity {
                 runOnUiThread(this::showWorkspace);
             } catch (Exception error) {
                 runOnUiThread(() -> setConnectStatus(error.getMessage(), true));
+            } finally {
+                runOnUiThread(() -> {
+                    progressBar.setVisibility(View.GONE);
+                    unlockButton.setEnabled(true);
+                });
+            }
+        }).start();
+    }
+
+    private void autoConnectSavedDevice() {
+        String savedServer = prefs.getString("server", "").trim();
+        String savedToken = prefs.getString("device_token", "").trim();
+        if (!isValidHttpUrl(savedServer) || savedToken.isEmpty()) return;
+
+        serverUrl = trimSlash(savedServer);
+        token = savedToken;
+        serverInput.setText(serverUrl);
+        progressBar.setVisibility(View.VISIBLE);
+        unlockButton.setEnabled(false);
+        setConnectStatus("Reconnecting to your paired Mac...", false);
+
+        new Thread(() -> {
+            try {
+                verifyAuth();
+                runOnUiThread(this::showWorkspace);
+            } catch (Exception error) {
+                token = "";
+                prefs.edit().remove("device_token").apply();
+                runOnUiThread(() -> {
+                    pairingCodeInput.requestFocus();
+                    setConnectStatus("Pairing expired. Enter the newest code from your Mac.", true);
+                });
             } finally {
                 runOnUiThread(() -> {
                     progressBar.setVisibility(View.GONE);
