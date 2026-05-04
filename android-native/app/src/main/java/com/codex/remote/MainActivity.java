@@ -580,8 +580,11 @@ public class MainActivity extends Activity {
         connection.setDoOutput(true);
         connection.setRequestProperty("Content-Type", "application/json");
         connection.setRequestProperty("X-Codex-Access-Mode", "local");
+        JSONObject body = new JSONObject();
+        body.put("deviceName", Build.MANUFACTURER + " " + Build.MODEL);
+        byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
         try (OutputStream out = connection.getOutputStream()) {
-            out.write("{}".getBytes(StandardCharsets.UTF_8));
+            out.write(payload);
         }
 
         int status = connection.getResponseCode();
@@ -786,6 +789,7 @@ public class MainActivity extends Activity {
         int status = connection.getResponseCode();
         String responseText = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
         if (status == 401) throw new Exception("Pairing code rejected. Check the newest code on your Mac.");
+        if (status == 409) throw new Exception("Approve this phone on your Mac, then tap Pair / Connect again.");
         if (status == 403) throw new Exception("Pairing over the internet requires HTTPS.");
         if (status < 200 || status >= 300) {
             String message = responseText.trim().isEmpty() ? "Server returned " + status + "." : responseText;
@@ -881,6 +885,9 @@ public class MainActivity extends Activity {
         connectScreen.setVisibility(View.VISIBLE);
         workspaceScreen.setVisibility(View.GONE);
         progressBar.setVisibility(View.GONE);
+        serverUrl = "";
+        pairingCodeInput.setText("");
+        setPairingCodeVisible(false);
         setConnectStatus("Ready", false);
     }
 

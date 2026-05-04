@@ -12,7 +12,7 @@
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
-    <link rel="stylesheet" href="/styles.css?v=14">
+    <link rel="stylesheet" href="/styles.css?v=15">
   </head>
   <body>
     <div class="shell">
@@ -102,6 +102,24 @@
             </header>
 
             <form class="login" id="loginForm">
+              <section class="pairing-request hidden" id="pairingRequestPanel" aria-live="polite">
+                <div class="pairing-device-mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M12 18h.01" />
+                    <path d="M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z" />
+                  </svg>
+                </div>
+                <div class="pairing-request-copy">
+                  <span>Nearby device wants to pair</span>
+                  <strong id="pairingRequestDevice">Android phone</strong>
+                  <code id="pairingRequestCode">0000 0000</code>
+                </div>
+                <div class="pairing-request-actions">
+                  <button class="secondary" id="cancelPairingRequest" type="button">Cancel</button>
+                  <button class="primary compact-primary" id="confirmPairingRequest" type="button">Confirm</button>
+                </div>
+              </section>
+
               <div class="field-stack">
                 <label class="relay-field pairing-field" for="pairingCode">
                   <span>Pairing code</span>
@@ -183,6 +201,6 @@
         </section>
       </main>
     </div>
-    <script src="/app.js?v=14" type="module"></script>
+    <script src="/app.js?v=15" type="module"></script>
   </body>
 </html>

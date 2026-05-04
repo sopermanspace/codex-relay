@@ -85,6 +85,7 @@ const allowLegacyToken = process.env.REMOTE_ALLOW_LEGACY_TOKEN === 'true';
 const failedAuth = new Map();
 const pairedDevices = new Map();
 let activePairing = createPairingCode();
+let pendingPairingRequest = null;
 
 const app = express();
 const server = http.createServer(app);
@@ -157,14 +158,83 @@ app.post('/api/pairing/start', (req, res) => {
     return;
   }
 
-  activePairing = createPairingCode();
+  const requestId = crypto.randomBytes(16).toString('base64url');
+  const deviceName = sanitizePairingDeviceName(req.body?.deviceName);
+  activePairing = createPairingCode({
+    requestId,
+    requiresConfirmation: true,
+    confirmedAt: 0
+  });
+  pendingPairingRequest = {
+    id: requestId,
+    deviceName,
+    ip,
+    createdAt: activePairing.createdAt,
+    expiresAt: activePairing.createdAt + pairingCodeTtlMs
+  };
   clearFailedAuth(ip);
   logPairingCode('Pairing code requested from nearby phone');
   res.json({
     ok: true,
+    requestId,
     pairingCodeLength: 8,
     expiresAt: Date.now() + pairingCodeTtlMs
   });
+});
+
+app.get('/api/pairing/request', (req, res) => {
+  if (!isPrivateNetworkIp(getClientIp(req)) && !isSecureRequest(req)) {
+    res.status(403).json({ error: 'Pairing requests are only visible on this Mac or trusted local network.' });
+    return;
+  }
+
+  if (!pendingPairingRequest || Date.now() > pendingPairingRequest.expiresAt) {
+    pendingPairingRequest = null;
+    res.json({ ok: true, request: null });
+    return;
+  }
+
+  res.json({
+    ok: true,
+    request: {
+      id: pendingPairingRequest.id,
+      deviceName: pendingPairingRequest.deviceName,
+      ip: pendingPairingRequest.ip,
+      code: `${activePairing.code.slice(0, 4)} ${activePairing.code.slice(4)}`,
+      confirmed: Boolean(activePairing.confirmedAt),
+      expiresAt: pendingPairingRequest.expiresAt
+    }
+  });
+});
+
+app.post('/api/pairing/confirm', (req, res) => {
+  if (!isPrivateNetworkIp(getClientIp(req)) && !isSecureRequest(req)) {
+    res.status(403).json({ error: 'Pairing confirmation must happen on this Mac or trusted local network.' });
+    return;
+  }
+
+  const requestId = String(req.body?.requestId || '');
+  if (!pendingPairingRequest || pendingPairingRequest.id !== requestId || Date.now() > pendingPairingRequest.expiresAt) {
+    res.status(404).json({ error: 'Pairing request expired.' });
+    return;
+  }
+
+  activePairing.confirmedAt = Date.now();
+  res.json({ ok: true });
+});
+
+app.post('/api/pairing/cancel', (req, res) => {
+  if (!isPrivateNetworkIp(getClientIp(req)) && !isSecureRequest(req)) {
+    res.status(403).json({ error: 'Pairing cancellation must happen on this Mac or trusted local network.' });
+    return;
+  }
+
+  const requestId = String(req.body?.requestId || '');
+  if (pendingPairingRequest && pendingPairingRequest.id === requestId) {
+    pendingPairingRequest = null;
+    activePairing = createPairingCode();
+  }
+  res.json({ ok: true });
 });
 
 app.post('/api/pair', (req, res) => {
@@ -180,6 +250,10 @@ app.post('/api/pair', (req, res) => {
     res.status(401).json({ error: 'Pairing code rejected. Check the code on your Mac and try again.' });
     return;
   }
+  if (activePairing.requiresConfirmation && !activePairing.confirmedAt) {
+    res.status(409).json({ error: 'Approve this phone on your Mac first, then tap Pair / Connect again.' });
+    return;
+  }
 
   const deviceToken = crypto.randomBytes(32).toString('base64url');
   pairedDevices.set(hashSecret(deviceToken), {
@@ -189,6 +263,7 @@ app.post('/api/pair', (req, res) => {
     userAgent: String(req.headers['user-agent'] || '').slice(0, 160)
   });
   clearFailedAuth(access.ip);
+  pendingPairingRequest = null;
   activePairing = createPairingCode();
   logPairingCode('Next pairing code');
 
@@ -720,10 +795,13 @@ function isRateLimited(ip) {
   return current.count >= maxFailedAuth;
 }
 
-function createPairingCode() {
+function createPairingCode(options = {}) {
   return {
     code: String(crypto.randomInt(0, 100_000_000)).padStart(8, '0'),
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    requestId: options.requestId || '',
+    requiresConfirmation: Boolean(options.requiresConfirmation),
+    confirmedAt: options.confirmedAt || 0
   };
 }
 
@@ -740,6 +818,7 @@ function isCurrentPairingCode(code) {
 function rotatePairingCodeIfExpired() {
   if (Date.now() - activePairing.createdAt <= pairingCodeTtlMs) return;
   activePairing = createPairingCode();
+  pendingPairingRequest = null;
   logPairingCode('New pairing code');
 }
 
@@ -775,6 +854,10 @@ function cleanupSecurityState() {
   for (const [tokenHash, device] of pairedDevices) {
     if (now - device.createdAt > deviceTokenTtlMs) pairedDevices.delete(tokenHash);
   }
+
+  if (pendingPairingRequest && now > pendingPairingRequest.expiresAt) {
+    pendingPairingRequest = null;
+  }
 }
 
 function parseCsv(value = '') {
@@ -789,6 +872,11 @@ function sanitizeProjectName(name) {
   if (name.includes('/') || name.includes('\\') || name === '.' || name === '..') return '';
   if (!/^[\w .-]+$/u.test(name)) return '';
   return name.replace(/\s+/g, ' ').trim();
+}
+
+function sanitizePairingDeviceName(name) {
+  const value = String(name || '').replace(/[^\w .-]/g, '').replace(/\s+/g, ' ').trim();
+  return value.slice(0, 60) || 'Android phone';
 }
 
 function clamp(value, min, max) {

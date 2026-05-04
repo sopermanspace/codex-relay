@@ -10,7 +10,7 @@ npm run setup
 npm start
 ```
 
-Keep this app-server running on your Mac. Setup prepares the local server and uses the current folder as the default Codex workspace. On first Android setup, keep your phone near the Mac on the same Wi-Fi, tap **Continue**, and the server will print a fresh 8-digit one-time pairing code for your phone.
+Keep this app-server running on your Mac. Setup prepares the local server and uses the current folder as the default Codex workspace. On first Android setup, keep your phone near the Mac on the same Wi-Fi and tap **Continue**. The Mac web screen shows a nearby-device pairing request with a fresh 8-digit one-time code; confirm it on the Mac, then enter the code on your phone.
 
 ## Native Android App
 

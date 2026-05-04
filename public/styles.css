@@ -634,6 +634,76 @@ h1 {
   gap: 0.7rem;
 }
 
+.pairing-request {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1rem;
+  align-items: center;
+  padding: 1.2rem;
+  border: 1px solid rgba(88, 230, 189, 0.36);
+  border-top-color: rgba(147, 255, 220, 0.54);
+  border-radius: 1.35rem;
+  background:
+    radial-gradient(circle at 14% 20%, rgba(88, 230, 189, 0.18), transparent 8rem),
+    rgba(10, 27, 24, 0.86);
+  box-shadow:
+    0 1.4rem 3.4rem rgba(0, 0, 0, 0.38),
+    0 0 2.8rem rgba(88, 230, 189, 0.12),
+    inset 0 0.08rem rgba(255, 255, 255, 0.11);
+  backdrop-filter: blur(1.4rem);
+}
+
+.pairing-device-mark {
+  display: grid;
+  width: 3.45rem;
+  aspect-ratio: 1;
+  place-items: center;
+  border: 1px solid rgba(88, 230, 189, 0.38);
+  border-radius: 1.1rem;
+  color: var(--accent);
+  background: rgba(88, 230, 189, 0.1);
+}
+
+.pairing-request-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.32rem;
+}
+
+.pairing-request-copy span {
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pairing-request-copy strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 1.08rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pairing-request-copy code {
+  width: fit-content;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 0.55rem;
+  color: #dffff4;
+  background: rgba(0, 0, 0, 0.24);
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pairing-request-actions {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.7rem;
+}
+
 .relay-field {
   display: grid;
   gap: 1.08rem;
@@ -854,6 +924,12 @@ input[aria-invalid="true"] {
     0 0.18rem 0.5rem rgba(0, 0, 0, 0.34),
     inset 0 0.08rem rgba(255, 255, 255, 0.42),
     inset 0 -0.8rem 1.5rem rgba(0, 0, 0, 0.08);
+}
+
+.compact-primary {
+  min-height: 3.35rem;
+  grid-template-columns: 1fr;
+  padding-inline: 1.4rem;
 }
 
 .primary svg {

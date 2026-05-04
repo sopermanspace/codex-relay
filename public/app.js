@@ -23,6 +23,11 @@ const paletteTitle = document.querySelector('#paletteTitle');
 const notifyButton = document.querySelector('#notifyButton');
 const shell = document.querySelector('.shell');
 const clearPairingButton = document.querySelector('#clearPairingButton');
+const pairingRequestPanel = document.querySelector('#pairingRequestPanel');
+const pairingRequestDevice = document.querySelector('#pairingRequestDevice');
+const pairingRequestCode = document.querySelector('#pairingRequestCode');
+const confirmPairingRequest = document.querySelector('#confirmPairingRequest');
+const cancelPairingRequest = document.querySelector('#cancelPairingRequest');
 const sidebarButton = document.querySelector('#sidebarButton');
 const projectsButton = document.querySelector('#projectsButton');
 const menuProjectsButton = document.querySelector('#menuProjectsButton');
@@ -45,6 +50,7 @@ let lastActivityAt = 0;
 let activeRequest = null;
 let activeAssistantMessage = null;
 let pendingAttachments = [];
+let visiblePairingRequest = null;
 
 localStorage.removeItem('codexRemoteToken');
 
@@ -52,6 +58,9 @@ clearPairingButton.addEventListener('click', () => {
   pairingCodeInput.value = '';
   pairingCodeInput.focus();
 });
+
+confirmPairingRequest?.addEventListener('click', () => respondToPairingRequest('confirm'));
+cancelPairingRequest?.addEventListener('click', () => respondToPairingRequest('cancel'));
 
 for (const button of [sidebarButton, projectsButton, menuProjectsButton]) {
   button?.addEventListener('click', () => openProjects());
@@ -83,6 +92,9 @@ if (deviceToken) {
   setStatus('Checking', 'busy');
   window.setTimeout(() => unlockChat(), 0);
 }
+
+pollPairingRequest();
+window.setInterval(pollPairingRequest, 2500);
 
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -250,7 +262,7 @@ async function pairDevice() {
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload.token) {
-    setStatus('Code rejected', 'error');
+    setStatus(response.status === 409 ? 'Confirm on Mac' : 'Code rejected', 'error');
     setFormError(payload.error || 'Pairing code rejected. Check the code on your Mac and try again.');
     setConnecting(false);
     throw new Error('Pairing rejected.');
@@ -258,6 +270,50 @@ async function pairDevice() {
 
   deviceToken = payload.token;
   localStorage.setItem('codexRelayDeviceToken', deviceToken);
+}
+
+async function pollPairingRequest() {
+  if (shell.classList.contains('is-unlocked')) return;
+  let payload;
+  try {
+    const response = await fetch('/api/pairing/request');
+    if (!response.ok) return;
+    payload = await response.json();
+  } catch {
+    return;
+  }
+
+  const request = payload.request;
+  if (!request) {
+    visiblePairingRequest = null;
+    pairingRequestPanel?.classList.add('hidden');
+    return;
+  }
+
+  visiblePairingRequest = request;
+  pairingRequestDevice.textContent = request.deviceName || 'Android phone';
+  pairingRequestCode.textContent = request.code || '0000 0000';
+  confirmPairingRequest.textContent = request.confirmed ? 'Confirmed' : 'Confirm';
+  confirmPairingRequest.disabled = Boolean(request.confirmed);
+  pairingRequestPanel?.classList.remove('hidden');
+}
+
+async function respondToPairingRequest(action) {
+  if (!visiblePairingRequest) return;
+  const requestId = visiblePairingRequest.id;
+  const endpoint = action === 'confirm' ? '/api/pairing/confirm' : '/api/pairing/cancel';
+  const button = action === 'confirm' ? confirmPairingRequest : cancelPairingRequest;
+  button.disabled = true;
+  try {
+    await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId })
+    });
+    await pollPairingRequest();
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function sendPrompt(prompt, attachments = []) {
