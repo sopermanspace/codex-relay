@@ -153,8 +153,8 @@ app.post('/api/pairing/start', (req, res) => {
     return;
   }
 
-  if (!isPrivateNetworkIp(ip) && !isSecureRequest(req)) {
-    res.status(403).json({ error: 'Pairing setup must start nearby on Wi-Fi or over HTTPS.' });
+  if (!isSameLocalNetwork(ip)) {
+    res.status(403).json({ error: 'Pairing setup must start from the same Wi-Fi as your Mac.' });
     return;
   }
 
@@ -252,6 +252,10 @@ app.post('/api/pair', (req, res) => {
   }
   if (activePairing.requiresConfirmation && !activePairing.confirmedAt) {
     res.status(409).json({ error: 'Approve this phone on your Mac first, then tap Pair / Connect again.' });
+    return;
+  }
+  if (activePairing.requiresConfirmation && !isSameLocalNetwork(access.ip)) {
+    res.status(403).json({ error: 'First-time pairing must finish on the same Wi-Fi as your Mac.' });
     return;
   }
 
@@ -899,7 +903,7 @@ function startDiscoveryResponder() {
   const socket = dgram.createSocket('udp4');
   socket.on('message', (message, rinfo) => {
     if (String(message).trim() !== discoveryRequest) return;
-    const url = getNetworkUrlForClient(rinfo.address, port) || getNetworkUrl(port);
+    const url = getNetworkUrlForClient(rinfo.address, port);
     if (!url) return;
 
     const payload = Buffer.from(JSON.stringify({
@@ -927,18 +931,48 @@ function startDiscoveryResponder() {
 
 function getNetworkUrlForClient(clientIp, selectedPort) {
   if (!clientIp || clientIp.includes(':')) return null;
-  let fallback = null;
   for (const addresses of Object.values(os.networkInterfaces())) {
     for (const address of addresses || []) {
       if (address.family !== 'IPv4' || address.internal) continue;
-      fallback ||= address.address;
-      const prefix = address.address.split('.').slice(0, 3).join('.');
-      if (clientIp.startsWith(`${prefix}.`)) {
+      if (isIpv4InNetwork(clientIp, address.address, address.netmask)) {
         return `http://${address.address}:${selectedPort}`;
       }
     }
   }
-  return fallback ? `http://${fallback}:${selectedPort}` : null;
+  return null;
+}
+
+function isSameLocalNetwork(clientIp) {
+  if (clientIp === '127.0.0.1' || clientIp === 'localhost' || clientIp === '::1') return true;
+  if (!clientIp || clientIp.includes(':')) return false;
+  for (const addresses of Object.values(os.networkInterfaces())) {
+    for (const address of addresses || []) {
+      if (address.family !== 'IPv4' || address.internal) continue;
+      if (isIpv4InNetwork(clientIp, address.address, address.netmask)) return true;
+    }
+  }
+  return false;
+}
+
+function isIpv4InNetwork(candidateIp, interfaceIp, netmask) {
+  const candidate = ipv4ToInt(candidateIp);
+  const current = ipv4ToInt(interfaceIp);
+  const mask = ipv4ToInt(netmask || '255.255.255.0');
+  if (candidate === null || current === null || mask === null) return false;
+  return (candidate & mask) === (current & mask);
+}
+
+function ipv4ToInt(value) {
+  const parts = String(value || '').split('.');
+  if (parts.length !== 4) return null;
+  let result = 0;
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return null;
+    const number = Number(part);
+    if (number < 0 || number > 255) return null;
+    result = ((result << 8) | number) >>> 0;
+  }
+  return result >>> 0;
 }
 
 function getProjectRoots() {

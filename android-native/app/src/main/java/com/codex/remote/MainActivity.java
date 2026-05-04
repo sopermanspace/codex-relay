@@ -520,7 +520,7 @@ public class MainActivity extends Activity {
                     pairingCodeInput.setText("");
                     pairingCodeInput.requestFocus();
                     unlockButton.setText("Pair / Connect");
-                    setConnectStatus("Enter the 8-digit code now shown on your Mac.", false);
+                    setConnectStatus("Confirm this phone on your Mac, then enter the 8-digit code shown there.", false);
                 });
             } catch (Exception error) {
                 runOnUiThread(() -> {
@@ -589,7 +589,7 @@ public class MainActivity extends Activity {
 
         int status = connection.getResponseCode();
         String response = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
-        if (status == 403) throw new Exception("Start pairing while your phone is near your Mac on the same Wi-Fi.");
+        if (status == 403) throw new Exception("Pairing only works when this phone and Mac are on the same Wi-Fi.");
         if (status < 200 || status >= 300) {
             throw new Exception(response.trim().isEmpty() ? "Pairing setup failed." : response);
         }
@@ -790,7 +790,7 @@ public class MainActivity extends Activity {
         String responseText = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
         if (status == 401) throw new Exception("Pairing code rejected. Check the newest code on your Mac.");
         if (status == 409) throw new Exception("Approve this phone on your Mac, then tap Pair / Connect again.");
-        if (status == 403) throw new Exception("Pairing over the internet requires HTTPS.");
+        if (status == 403) throw new Exception("First-time pairing must finish on the same Wi-Fi as your Mac.");
         if (status < 200 || status >= 300) {
             String message = responseText.trim().isEmpty() ? "Server returned " + status + "." : responseText;
             throw new Exception(message);
