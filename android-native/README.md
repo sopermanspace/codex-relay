@@ -5,7 +5,7 @@ Native Android client for the Codex app-server. This is not a browser install fl
 ## What It Does
 
 - Creates Codex sessions through the app-server HTTP API.
-- Uses a native connection screen for the server URL and one-time pairing code.
+- Uses a native nearby-pairing screen with local Wi-Fi discovery and a one-time pairing code.
 - Verifies access through the app-server auth API.
 - Sends tasks through the app-server command API.
 - Renders Codex results in native Android views.
@@ -34,20 +34,17 @@ Push the repo to GitHub and run the **Build Android APK** workflow from the Acti
 codex-remote-debug-apk
 ```
 
-## Configure
+## Pair The Phone
 
-Default server URL is set in:
+1. Start the Codex Relay server on your Mac with `npm start`.
+2. Open the Android app while the phone and Mac are on the same Wi-Fi.
+3. Tap **Continue**. The phone discovers Codex Relay locally and asks the Mac to show a fresh 8-digit code.
+4. Enter the code shown in the Mac terminal. The app stores a private paired-device key and reconnects automatically after that.
+
+The old default server URL is kept only as a development fallback in:
 
 ```text
 app/src/main/res/values/strings.xml
 ```
 
-For phone testing on the same Wi-Fi network, use your Mac LAN URL from the app-server output, for example:
-
-```text
-http://192.168.18.182:8787
-```
-
-For “from anywhere,” use an HTTPS tunnel URL such as Cloudflare Tunnel.
-
-When the app-server starts, it prints an 8-digit pairing code. Enter that code once on Android; the server exchanges it for a random device key and stores only that paired-device credential on the phone.
+For "from anywhere," pair once nearby first, then make the saved server reachable through an HTTPS tunnel such as Cloudflare Tunnel. Do not expose the local HTTP server directly to the internet.

@@ -2,6 +2,7 @@ import 'dotenv/config';
 
 import http from 'node:http';
 import crypto from 'node:crypto';
+import dgram from 'node:dgram';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -22,6 +23,8 @@ const execFileAsync = promisify(execFile);
 
 const host = process.env.HOST || '0.0.0.0';
 const port = Number(process.env.PORT || 8787);
+const discoveryPort = Number(process.env.REMOTE_DISCOVERY_PORT || 8788);
+const discoveryRequest = 'CODEX_RELAY_DISCOVER_V1';
 const codexCommand = process.env.CODEX_COMMAND || 'codex';
 const codexWorkdir = process.env.CODEX_WORKDIR || os.homedir();
 const projectRoots = getProjectRoots();
@@ -139,6 +142,28 @@ app.get('/api/config', (req, res) => {
     pairingCodeLength: 8,
     secureTransport: isSecureRequest(req),
     localNetwork: isPrivateNetworkIp(getClientIp(req))
+  });
+});
+
+app.post('/api/pairing/start', (req, res) => {
+  const ip = getClientIp(req);
+  if (isRateLimited(ip)) {
+    res.status(429).json({ error: 'Too many pairing attempts. Wait, then try again.' });
+    return;
+  }
+
+  if (!isPrivateNetworkIp(ip) && !isSecureRequest(req)) {
+    res.status(403).json({ error: 'Pairing setup must start nearby on Wi-Fi or over HTTPS.' });
+    return;
+  }
+
+  activePairing = createPairingCode();
+  clearFailedAuth(ip);
+  logPairingCode('Pairing code requested from nearby phone');
+  res.json({
+    ok: true,
+    pairingCodeLength: 8,
+    expiresAt: Date.now() + pairingCodeTtlMs
   });
 });
 
@@ -529,6 +554,8 @@ server.listen(port, host, () => {
   }
 });
 
+startDiscoveryResponder();
+
 setInterval(cleanupSecurityState, 60_000).unref();
 setInterval(rotatePairingCodeIfExpired, 15_000).unref();
 
@@ -778,6 +805,52 @@ function getNetworkUrl(selectedPort) {
     }
   }
   return null;
+}
+
+function startDiscoveryResponder() {
+  const socket = dgram.createSocket('udp4');
+  socket.on('message', (message, rinfo) => {
+    if (String(message).trim() !== discoveryRequest) return;
+    const url = getNetworkUrlForClient(rinfo.address, port) || getNetworkUrl(port);
+    if (!url) return;
+
+    const payload = Buffer.from(JSON.stringify({
+      type: 'CODEX_RELAY_DISCOVERY_V1',
+      name: 'Codex Relay',
+      url,
+      port
+    }));
+    socket.send(payload, rinfo.port, rinfo.address);
+  });
+  socket.on('error', (error) => {
+    console.warn(`Codex Relay discovery disabled: ${error.message}`);
+    socket.close();
+  });
+  socket.bind(discoveryPort, host, () => {
+    try {
+      socket.setBroadcast(true);
+    } catch {
+      // Some hosts do not allow broadcast toggles; direct replies still work.
+    }
+    console.log(`Nearby pairing discovery listening on udp://0.0.0.0:${discoveryPort}`);
+  });
+  socket.unref();
+}
+
+function getNetworkUrlForClient(clientIp, selectedPort) {
+  if (!clientIp || clientIp.includes(':')) return null;
+  let fallback = null;
+  for (const addresses of Object.values(os.networkInterfaces())) {
+    for (const address of addresses || []) {
+      if (address.family !== 'IPv4' || address.internal) continue;
+      fallback ||= address.address;
+      const prefix = address.address.split('.').slice(0, 3).join('.');
+      if (clientIp.startsWith(`${prefix}.`)) {
+        return `http://${address.address}:${selectedPort}`;
+      }
+    }
+  }
+  return fallback ? `http://${fallback}:${selectedPort}` : null;
 }
 
 function getProjectRoots() {

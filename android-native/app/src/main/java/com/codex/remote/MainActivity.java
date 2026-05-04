@@ -47,13 +47,19 @@ import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
 import java.net.HttpURLConnection;
+import java.net.InetAddress;
+import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 public class MainActivity extends Activity {
     private static final String PREFS = "codex_remote";
     private static final String NOTIFICATION_CHANNEL = "codex_task_status";
+    private static final int DISCOVERY_PORT = 8788;
+    private static final String DISCOVERY_REQUEST = "CODEX_RELAY_DISCOVER_V1";
     private static final int BG = Color.rgb(6, 7, 10);
     private static final int PANEL = Color.rgb(12, 13, 17);
     private static final int PANEL_2 = Color.rgb(21, 23, 28);
@@ -81,6 +87,8 @@ public class MainActivity extends Activity {
     private TextView projectSetupStatus;
     private TextView chatContextLabel;
     private TextView accessModeHint;
+    private TextView serverLabel;
+    private TextView pairingCodeLabel;
     private TextView securityStatus;
     private TextView chatTitle;
     private TextView composerStatus;
@@ -110,6 +118,7 @@ public class MainActivity extends Activity {
     private JSONArray loadedSlashCommands = new JSONArray();
     private JSONArray loadedMentions = new JSONArray();
     private int chatNumber = 1;
+    private boolean pairingCodeVisible = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -238,25 +247,30 @@ public class MainActivity extends Activity {
         subtitleParams.bottomMargin = dp(32);
         connectScreen.addView(subtitle, subtitleParams);
 
-        accessModeHint = caption("First setup: enter your Mac URL and the 8-digit code shown on your Mac.");
+        accessModeHint = caption("Stay near your Mac for first setup. Continue will find Codex on this Wi-Fi and ask your Mac to show a one-time code.");
         accessModeHint.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams modeHintParams = matchWrap();
         modeHintParams.bottomMargin = dp(18);
         connectScreen.addView(accessModeHint, modeHintParams);
 
-        connectScreen.addView(formLabel("Server URL"));
+        serverLabel = formLabel("Server URL");
+        connectScreen.addView(serverLabel);
         String savedServer = prefs.getString("server", getString(R.string.default_server_url));
         if (savedServer.contains("192.168.18.182")) savedServer = getString(R.string.default_server_url);
         serverInput = input(savedServer, false, getString(R.string.default_server_url));
         connectScreen.addView(serverInput, fieldParams());
+        serverLabel.setVisibility(View.GONE);
+        serverInput.setVisibility(View.GONE);
 
-        connectScreen.addView(formLabel("Pairing code"));
+        pairingCodeLabel = formLabel("Pairing code");
+        connectScreen.addView(pairingCodeLabel);
         pairingCodeInput = input("", false, "0000 0000");
         pairingCodeInput.setInputType(InputType.TYPE_CLASS_NUMBER);
         connectScreen.addView(pairingCodeInput, fieldParams());
+        setPairingCodeVisible(false);
 
-        unlockButton = primaryButton("Pair / Connect");
-        unlockButton.setOnClickListener(view -> connect());
+        unlockButton = primaryButton("Continue");
+        unlockButton.setOnClickListener(view -> continuePairingFlow());
         LinearLayout.LayoutParams unlockParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58));
         unlockParams.topMargin = dp(24);
         connectScreen.addView(unlockButton, unlockParams);
@@ -473,11 +487,118 @@ public class MainActivity extends Activity {
         workspaceScreen.addView(resultBody, new LinearLayout.LayoutParams(1, 1));
     }
 
+    private void continuePairingFlow() {
+        String pairingCode = pairingCodeInput.getText().toString().replaceAll("\\D", "");
+        if (!pairingCodeVisible && pairingCode.isEmpty()) {
+            discoverAndStartPairing();
+            return;
+        }
+        connect();
+    }
+
+    private void setPairingCodeVisible(boolean visible) {
+        pairingCodeVisible = visible;
+        if (pairingCodeLabel != null) pairingCodeLabel.setVisibility(visible ? View.VISIBLE : View.GONE);
+        if (pairingCodeInput != null) pairingCodeInput.setVisibility(visible ? View.VISIBLE : View.GONE);
+        if (unlockButton != null) unlockButton.setText(visible ? "Pair / Connect" : "Continue");
+    }
+
+    private void discoverAndStartPairing() {
+        progressBar.setVisibility(View.VISIBLE);
+        unlockButton.setEnabled(false);
+        unlockButton.setText("Looking...");
+        setConnectStatus("Looking for Codex Relay on this Wi-Fi...", false);
+
+        new Thread(() -> {
+            try {
+                String discoveredUrl = discoverServerUrl();
+                serverUrl = trimSlash(discoveredUrl);
+                requestPairingCode();
+                runOnUiThread(() -> {
+                    serverInput.setText(serverUrl);
+                    setPairingCodeVisible(true);
+                    pairingCodeInput.setText("");
+                    pairingCodeInput.requestFocus();
+                    unlockButton.setText("Pair / Connect");
+                    setConnectStatus("Enter the 8-digit code now shown on your Mac.", false);
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    serverUrl = "";
+                    setPairingCodeVisible(false);
+                    unlockButton.setText("Try again");
+                    setConnectStatus(error.getMessage(), true);
+                });
+            } finally {
+                runOnUiThread(() -> {
+                    progressBar.setVisibility(View.GONE);
+                    unlockButton.setEnabled(true);
+                });
+            }
+        }).start();
+    }
+
+    private String discoverServerUrl() throws Exception {
+        byte[] request = DISCOVERY_REQUEST.getBytes(StandardCharsets.UTF_8);
+        byte[] buffer = new byte[1024];
+
+        try (DatagramSocket socket = new DatagramSocket()) {
+            socket.setBroadcast(true);
+            socket.setSoTimeout(4500);
+
+            DatagramPacket outbound = new DatagramPacket(
+                request,
+                request.length,
+                InetAddress.getByName("255.255.255.255"),
+                DISCOVERY_PORT
+            );
+            socket.send(outbound);
+
+            DatagramPacket inbound = new DatagramPacket(buffer, buffer.length);
+            socket.receive(inbound);
+            String responseText = new String(inbound.getData(), inbound.getOffset(), inbound.getLength(), StandardCharsets.UTF_8);
+            JSONObject response = new JSONObject(responseText);
+            if (!"CODEX_RELAY_DISCOVERY_V1".equals(response.optString("type"))) {
+                throw new Exception("Found an unknown service on this network.");
+            }
+            String discoveredUrl = response.optString("url", "");
+            if (!isValidHttpUrl(discoveredUrl)) {
+                throw new Exception("Codex Relay did not return a reachable address.");
+            }
+            return discoveredUrl;
+        } catch (SocketTimeoutException timeout) {
+            throw new Exception("Could not find Codex Relay. Keep your phone and Mac on the same Wi-Fi, then try again.");
+        }
+    }
+
+    private void requestPairingCode() throws Exception {
+        URL url = new URL(serverUrl + "/api/pairing/start");
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("POST");
+        connection.setConnectTimeout(10000);
+        connection.setReadTimeout(10000);
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Content-Type", "application/json");
+        connection.setRequestProperty("X-Codex-Access-Mode", "local");
+        try (OutputStream out = connection.getOutputStream()) {
+            out.write("{}".getBytes(StandardCharsets.UTF_8));
+        }
+
+        int status = connection.getResponseCode();
+        String response = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
+        if (status == 403) throw new Exception("Start pairing while your phone is near your Mac on the same Wi-Fi.");
+        if (status < 200 || status >= 300) {
+            throw new Exception(response.trim().isEmpty() ? "Pairing setup failed." : response);
+        }
+        JSONObject object = new JSONObject(response);
+        if (!object.optBoolean("ok", false)) throw new Exception("Codex Relay did not start pairing.");
+    }
+
     private void connect() {
-        String nextServer = serverInput.getText().toString().trim();
+        String nextServer = serverUrl.trim().isEmpty() ? serverInput.getText().toString().trim() : serverUrl.trim();
         String pairingCode = pairingCodeInput.getText().toString().replaceAll("\\D", "");
         if (!isValidHttpUrl(nextServer)) {
-            setConnectStatus("Enter a valid HTTP or HTTPS URL.", true);
+            setConnectStatus("Tap Continue near your Mac to find Codex Relay.", true);
             return;
         }
         String savedToken = prefs.getString("device_token", "");
@@ -515,6 +636,7 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     progressBar.setVisibility(View.GONE);
                     unlockButton.setEnabled(true);
+                    unlockButton.setText(pairingCodeVisible ? "Pair / Connect" : "Continue");
                 });
             }
         }).start();
@@ -540,8 +662,10 @@ public class MainActivity extends Activity {
                 token = "";
                 prefs.edit().remove("device_token").apply();
                 runOnUiThread(() -> {
-                    pairingCodeInput.requestFocus();
-                    setConnectStatus("Pairing expired. Enter the newest code from your Mac.", true);
+                    serverUrl = "";
+                    setPairingCodeVisible(false);
+                    unlockButton.setText("Continue");
+                    setConnectStatus("Pairing expired. Continue near your Mac to pair again.", true);
                 });
             } finally {
                 runOnUiThread(() -> {
@@ -837,7 +961,7 @@ public class MainActivity extends Activity {
                 : "Home only blocks connections outside your trusted Wi-Fi.");
         }
         if (accessModeHint != null) {
-            accessModeHint.setText("Use your Mac URL once, then enter the one-time pairing code shown on your Mac.");
+            accessModeHint.setText("Stay near your Mac for first setup. Continue will find Codex on this Wi-Fi and ask your Mac to show a one-time code.");
         }
     }
 

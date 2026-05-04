@@ -10,7 +10,7 @@ npm run setup
 npm start
 ```
 
-Keep this app-server running on your Mac. Setup prepares the local server, uses the current folder as the default Codex workspace, and prints the local URL your phone should use at home. When the server starts, it prints a short one-time pairing code for your phone.
+Keep this app-server running on your Mac. Setup prepares the local server and uses the current folder as the default Codex workspace. On first Android setup, keep your phone near the Mac on the same Wi-Fi, tap **Continue**, and the server will print a fresh 8-digit one-time pairing code for your phone.
 
 ## Native Android App
 
@@ -46,7 +46,7 @@ npm run build:icons
 
 ## Use From Anywhere
 
-Use **Home network** in the Android app when your phone and Mac are on the same trusted Wi-Fi.
+Use **Home network** in the Android app when your phone and Mac are on the same trusted Wi-Fi. The first setup discovers the Mac locally, then stores a private device key on the phone so future launches reconnect automatically.
 
 Use **Away from home** only with an HTTPS tunnel or reverse proxy. Do not port-forward this server directly from your router. One practical setup:
 
@@ -61,8 +61,8 @@ TRUST_PROXY=true
 PUBLIC_URL=https://your-secure-tunnel.example
 ```
 
-Restart with `npm start`, then use the HTTPS URL in **Away from home** mode. A reverse proxy with TLS and IP allowlisting is also supported.
+Restart with `npm start`. After the phone has paired once, it can reconnect automatically whenever the saved server address is reachable. For away-from-home use, that saved address must be an HTTPS tunnel or reverse proxy; a code by itself cannot make a private Mac reachable across the internet.
 
 ## Security Notes
 
-This controls a shell session on your Mac. Pairing codes are one-time, short-lived, rate-limited, and exchanged for a random device key stored on the phone. Use HTTPS for remote access, avoid direct internet exposure, and prefer a trusted tunnel or reverse proxy. A pairing code replaces the old mobile token entry, but it does not replace the need for a reachable LAN URL or HTTPS tunnel URL.
+This controls a shell session on your Mac. Pairing codes are one-time, short-lived, rate-limited, and exchanged for a random device key stored on the phone. Use HTTPS for remote access, avoid direct internet exposure, and prefer a trusted tunnel or reverse proxy. Nearby discovery removes manual URL entry for first setup, but it does not replace TLS for hostile networks or the need for a reachable HTTPS tunnel when you are away.
