@@ -10,7 +10,7 @@ npm run setup
 npm start
 ```
 
-Keep this app-server running on your Mac. Setup prepares the local server and uses the current folder as the default Codex workspace. On first Android setup, keep your phone near the Mac on the same Wi-Fi and tap **Continue**. The Codex Relay web screen on your Mac shows a floating nearby-device request with a fresh 8-digit one-time code; confirm it on the Mac, then enter the code on your phone. Codex itself is closed-source, so the pairing prompt is shown in this Relay web UI, not injected into the Codex desktop app.
+Keep this app-server running on your Mac. Setup prepares the local server and uses the current folder as the default Codex workspace. On first Android setup, keep your phone near the Mac on the same Wi-Fi and tap **Continue**. The Codex Relay web screen on your Mac shows a centered one-time 8-digit code; confirm it on the Mac, then enter the code on your phone. Codex itself is closed-source, so the pairing code is shown in this Relay web UI, not injected into the Codex desktop app.
 
 ## Native Android App
 

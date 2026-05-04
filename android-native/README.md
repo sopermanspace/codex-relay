@@ -39,7 +39,7 @@ codex-remote-debug-apk
 1. Start the Codex Relay server on your Mac with `npm start`.
 2. Open the Android app while the phone and Mac are on the same Wi-Fi.
 3. Tap **Continue**. The phone discovers Codex Relay locally and asks the Mac to show a fresh 8-digit code.
-4. Confirm the nearby-device request on the Codex Relay web screen on your Mac. This prompt appears in Relay, not inside the closed-source Codex desktop app.
+4. Confirm the centered one-time code screen on the Codex Relay web page on your Mac. This appears in Relay, not inside the closed-source Codex desktop app.
 5. Enter the code shown on the Mac. The app stores a private paired-device key and reconnects automatically after that.
 
 The old default server URL is kept only as a development fallback in:
