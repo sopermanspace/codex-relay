@@ -293,42 +293,44 @@ public class MainActivity extends Activity {
         header.setGravity(Gravity.CENTER_VERTICAL);
         workspaceScreen.addView(header, matchWrap());
 
-        CommandMarkView appMark = new CommandMarkView(this);
-        LinearLayout.LayoutParams markParams = new LinearLayout.LayoutParams(dp(44), dp(44));
-        markParams.rightMargin = dp(12);
-        header.addView(appMark, markParams);
+        Button menuButton = circleButton("☰");
+        menuButton.setOnClickListener(view -> togglePanel(projectPanel));
+        LinearLayout.LayoutParams menuParams = new LinearLayout.LayoutParams(dp(56), dp(56));
+        header.addView(menuButton, menuParams);
 
-        LinearLayout titles = new LinearLayout(this);
-        titles.setOrientation(LinearLayout.VERTICAL);
-        header.addView(titles, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        chatTitle = sectionTitle("Codex Relay");
-        titles.addView(chatTitle);
-        metaLabel = caption("Choose a project");
-        titles.addView(metaLabel);
+        statusPill = chatStatusPill("Ready");
+        LinearLayout.LayoutParams statusHeaderParams = new LinearLayout.LayoutParams(dp(126), dp(48));
+        statusHeaderParams.leftMargin = dp(12);
+        header.addView(statusPill, statusHeaderParams);
 
-        Button projectsButton = quietButton("Projects");
-        projectsButton.setOnClickListener(view -> togglePanel(projectPanel));
-        LinearLayout.LayoutParams projectsButtonParams = new LinearLayout.LayoutParams(dp(96), dp(44));
-        projectsButtonParams.rightMargin = dp(8);
-        header.addView(projectsButton, projectsButtonParams);
+        TextView headerSpacer = new TextView(this);
+        header.addView(headerSpacer, new LinearLayout.LayoutParams(0, 1, 1));
 
-        LinearLayout chatMeta = new LinearLayout(this);
-        chatMeta.setOrientation(LinearLayout.HORIZONTAL);
-        chatMeta.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams chatMetaParams = matchWrap();
-        chatMetaParams.topMargin = dp(16);
-        workspaceScreen.addView(chatMeta, chatMetaParams);
+        LinearLayout headerActions = new LinearLayout(this);
+        headerActions.setOrientation(LinearLayout.HORIZONTAL);
+        headerActions.setGravity(Gravity.CENTER_VERTICAL);
+        headerActions.setPadding(dp(8), dp(4), dp(8), dp(4));
+        headerActions.setBackground(rounded(PANEL_2, Color.argb(54, 250, 250, 250), 1, 28));
+        header.addView(headerActions, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(58)));
 
-        statusPill = chip("Online");
-        chatMeta.addView(statusPill, new LinearLayout.LayoutParams(dp(88), dp(34)));
-        chatContextLabel = caption("Chat 1 · No project selected");
-        LinearLayout.LayoutParams contextParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
-        contextParams.leftMargin = dp(12);
-        chatMeta.addView(chatContextLabel, contextParams);
-
-        Button newChat = quietButton("New chat");
+        Button newChat = iconTextButton("+");
         newChat.setOnClickListener(view -> startNewChat());
-        chatMeta.addView(newChat, new LinearLayout.LayoutParams(dp(96), dp(40)));
+        headerActions.addView(newChat, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+        Button settingsButton = iconTextButton("◌");
+        settingsButton.setOnClickListener(view -> togglePanel(securityPanel));
+        headerActions.addView(settingsButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+        Button moreButton = iconTextButton("⋯");
+        moreButton.setOnClickListener(view -> togglePanel(projectPanel));
+        headerActions.addView(moreButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+        chatTitle = sectionTitle("Codex Relay");
+        chatTitle.setVisibility(View.GONE);
+        metaLabel = caption("Choose a project");
+        metaLabel.setVisibility(View.GONE);
+        chatContextLabel = caption("Chat 1 · No project selected");
+        chatContextLabel.setVisibility(View.GONE);
 
         projectPanel = panel();
         projectPanel.setVisibility(View.GONE);
@@ -418,13 +420,21 @@ public class MainActivity extends Activity {
         securityPanel.addView(securityStatus, securityStatusParams);
         updateAccessModeUi();
 
-        LinearLayout chatSurface = panel();
-        LinearLayout.LayoutParams chatSurfaceParams = matchWrap();
+        LinearLayout chatSurface = new LinearLayout(this);
+        chatSurface.setOrientation(LinearLayout.VERTICAL);
+        chatSurface.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams chatSurfaceParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            0,
+            1
+        );
         chatSurfaceParams.topMargin = dp(18);
+        chatSurface.setMinimumHeight(dp(430));
         workspaceScreen.addView(chatSurface, chatSurfaceParams);
 
         chatList = new LinearLayout(this);
         chatList.setOrientation(LinearLayout.VERTICAL);
+        chatList.setGravity(Gravity.CENTER);
         chatSurface.addView(chatList, matchWrap());
         resetChatEmpty();
 
@@ -437,41 +447,43 @@ public class MainActivity extends Activity {
         suggestionList.setOrientation(LinearLayout.VERTICAL);
         suggestionPanel.addView(suggestionList, matchWrap());
 
-        LinearLayout composer = miniPanel();
+        LinearLayout composer = new LinearLayout(this);
+        composer.setOrientation(LinearLayout.HORIZONTAL);
+        composer.setGravity(Gravity.CENTER_VERTICAL);
+        composer.setPadding(dp(8), dp(8), dp(8), dp(8));
+        composer.setBackground(rounded(Color.rgb(31, 31, 31), Color.argb(58, 250, 250, 250), 1, 32));
         LinearLayout.LayoutParams composerParams = matchWrap();
         composerParams.topMargin = dp(14);
         workspaceScreen.addView(composer, composerParams);
 
-        promptInput = input("", false, "Message Codex...");
+        Button addButton = iconTextButton("+");
+        addButton.setOnClickListener(view -> Toast.makeText(this, "Attachments are coming next.", Toast.LENGTH_SHORT).show());
+        composer.addView(addButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+        promptInput = chatInput("", "Ask Codex");
         promptInput.setSingleLine(false);
-        promptInput.setMinLines(3);
-        promptInput.setGravity(Gravity.TOP | Gravity.START);
+        promptInput.setMinLines(1);
+        promptInput.setMaxLines(4);
+        promptInput.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
         promptInput.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) { updateSuggestions(s.toString()); }
             @Override public void afterTextChanged(Editable s) {}
         });
-        composer.addView(promptInput, compactComposerParams());
-
-        LinearLayout composerActions = new LinearLayout(this);
-        composerActions.setOrientation(LinearLayout.HORIZONTAL);
-        composerActions.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams composerActionsParams = matchWrap();
-        composerActionsParams.topMargin = dp(12);
-        composer.addView(composerActions, composerActionsParams);
-
-        Button settingsButton = quietButton("Security");
-        settingsButton.setOnClickListener(view -> togglePanel(securityPanel));
-        LinearLayout.LayoutParams settingsParams = new LinearLayout.LayoutParams(dp(96), dp(48));
-        settingsParams.rightMargin = dp(10);
-        composerActions.addView(settingsButton, settingsParams);
+        composer.addView(promptInput, new LinearLayout.LayoutParams(0, dp(52), 1));
 
         composerStatus = caption("Type / for commands or @ for files.");
-        composerActions.addView(composerStatus, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        composerStatus.setVisibility(View.GONE);
 
-        runButton = primaryButton("Send");
+        Button micButton = iconTextButton("mic");
+        micButton.setOnClickListener(view -> Toast.makeText(this, "Voice input is not enabled yet.", Toast.LENGTH_SHORT).show());
+        composer.addView(micButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+        runButton = sendCircleButton();
         runButton.setOnClickListener(view -> runCommand());
-        composerActions.addView(runButton, new LinearLayout.LayoutParams(dp(92), dp(48)));
+        LinearLayout.LayoutParams sendParams = new LinearLayout.LayoutParams(dp(52), dp(52));
+        sendParams.leftMargin = dp(4);
+        composer.addView(runButton, sendParams);
 
         copyButton = quietButton("Copy last");
         copyButton.setVisibility(View.GONE);
@@ -918,8 +930,8 @@ public class MainActivity extends Activity {
     private void setBusy(boolean busy) {
         progressBar.setVisibility(busy ? View.VISIBLE : View.GONE);
         runButton.setEnabled(!busy);
-        runButton.setText(busy ? "..." : "Send");
-        statusPill.setText(busy ? "Running" : "Online");
+        runButton.setText(busy ? "..." : "↑");
+        statusPill.setText(busy ? "Thinking" : "Ready");
         if (composerStatus != null) {
             composerStatus.setText(busy ? "Codex is responding..." : "Type / for commands or @ for files.");
             composerStatus.setTextColor(SOFT);
@@ -1002,12 +1014,36 @@ public class MainActivity extends Activity {
     private void resetChatEmpty() {
         if (chatList == null) return;
         chatList.removeAllViews();
-        addMessageBubble("Choose a project, then message Codex like you would in ChatGPT. I will run the task on your Mac.", false, false);
+        chatList.setGravity(Gravity.CENTER);
+        LinearLayout empty = new LinearLayout(this);
+        empty.setOrientation(LinearLayout.VERTICAL);
+        empty.setGravity(Gravity.CENTER);
+        empty.setTag("empty-state");
+
+        TextView title = new TextView(this);
+        title.setText("Today's work");
+        title.setTextColor(TEXT);
+        title.setTextSize(28);
+        title.setGravity(Gravity.CENTER);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        empty.addView(title, matchWrap());
+
+        TextView subtitle = body("Ask for edits, checks, explanations, or project help.");
+        subtitle.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams subtitleParams = matchWrap();
+        subtitleParams.topMargin = dp(10);
+        empty.addView(subtitle, subtitleParams);
+
+        chatList.addView(empty, matchWrap());
         lastOutput = "";
     }
 
     private void addMessageBubble(String message, boolean user, boolean error) {
         if (chatList == null) return;
+        if (chatList.getChildCount() == 1 && "empty-state".equals(chatList.getChildAt(0).getTag())) {
+            chatList.removeAllViews();
+        }
+        chatList.setGravity(Gravity.NO_GRAVITY);
         LinearLayout row = new LinearLayout(this);
         row.setGravity(user ? Gravity.END : Gravity.START);
 
@@ -1682,6 +1718,63 @@ public class MainActivity extends Activity {
         button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         button.setBackground(rounded(PANEL_2, Color.argb(40, 250, 250, 250), 1, 20));
         return button;
+    }
+
+    private Button circleButton(String text) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setAllCaps(false);
+        button.setTextColor(TEXT);
+        button.setTextSize(26);
+        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        button.setBackground(rounded(PANEL_2, Color.argb(58, 250, 250, 250), 1, 28));
+        return button;
+    }
+
+    private Button iconTextButton(String text) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setAllCaps(false);
+        button.setTextColor(TEXT);
+        button.setTextSize(text.length() > 1 ? 13 : 28);
+        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        button.setBackground(rounded(Color.TRANSPARENT, Color.TRANSPARENT, 0, 24));
+        return button;
+    }
+
+    private Button sendCircleButton() {
+        Button button = new Button(this);
+        button.setText("↑");
+        button.setAllCaps(false);
+        button.setTextColor(Color.rgb(5, 5, 5));
+        button.setTextSize(24);
+        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        button.setBackground(rounded(Color.rgb(248, 248, 248), Color.argb(230, 255, 255, 255), 1, 26));
+        return button;
+    }
+
+    private EditText chatInput(String value, String hint) {
+        EditText input = new EditText(this);
+        input.setText(value);
+        input.setHint(hint);
+        input.setTextSize(18);
+        input.setTextColor(TEXT);
+        input.setHintTextColor(Color.rgb(168, 168, 174));
+        input.setPadding(dp(12), 0, dp(10), 0);
+        input.setBackground(rounded(Color.TRANSPARENT, Color.TRANSPARENT, 0, 0));
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        return input;
+    }
+
+    private TextView chatStatusPill(String value) {
+        TextView text = new TextView(this);
+        text.setText(value);
+        text.setTextColor(ACCENT);
+        text.setTextSize(20);
+        text.setGravity(Gravity.CENTER);
+        text.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        text.setBackground(rounded(PANEL_2, Color.argb(58, 250, 250, 250), 1, 28));
+        return text;
     }
 
     private TextView labelCaps(String value) {
