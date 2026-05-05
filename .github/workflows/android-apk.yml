@@ -7,6 +7,9 @@ on:
       - "android-native/**"
       - ".github/workflows/android-apk.yml"
 
+permissions:
+  contents: write
+
 jobs:
   debug-apk:
     name: Build native debug APK
@@ -37,3 +40,18 @@ jobs:
           name: codex-remote-debug-apk
           path: android-native/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Publish latest APK release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION_CODE="$(grep -m1 'versionCode' android-native/app/build.gradle | awk '{print $2}')"
+          VERSION_NAME="$(grep -m1 'versionName' android-native/app/build.gradle | sed -E 's/.*versionName "([^"]+)".*/\1/')"
+          NOTES="versionCode: ${VERSION_CODE}
+          versionName: ${VERSION_NAME}
+
+          Latest Codex Relay Android debug APK."
+          gh release view android-latest >/dev/null 2>&1 || gh release create android-latest --title "Codex Relay Android Latest" --notes "${NOTES}" --target "${GITHUB_SHA}"
+          gh release edit android-latest --title "Codex Relay Android Latest" --notes "${NOTES}" --latest
+          gh release upload android-latest android-native/app/build/outputs/apk/debug/app-debug.apk#codex-relay-debug.apk --clobber

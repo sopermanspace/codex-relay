@@ -1,0 +1,8 @@
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <external-files-path
+        name="updates"
+        path="Download/" />
+    <files-path
+        name="internal-updates"
+        path="." />
+</paths>

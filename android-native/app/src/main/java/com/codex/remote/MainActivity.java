@@ -11,6 +11,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.pm.PackageInfo;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Bitmap;
@@ -24,6 +25,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
@@ -41,10 +43,14 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.core.content.FileProvider;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -59,6 +65,7 @@ import java.nio.charset.StandardCharsets;
 public class MainActivity extends Activity {
     private static final String PREFS = "codex_remote";
     private static final String NOTIFICATION_CHANNEL = "codex_task_status";
+    private static final String UPDATE_RELEASE_URL = "https://api.github.com/repos/sopermanspace/codex-android-remote/releases/tags/android-latest";
     private static final int DISCOVERY_PORT = 8788;
     private static final String DISCOVERY_REQUEST = "CODEX_RELAY_DISCOVER_V1";
     private static final int BG = Color.rgb(6, 7, 10);
@@ -108,6 +115,7 @@ public class MainActivity extends Activity {
     private Button copyButton;
     private Button autoSecurityButton;
     private Button homeOnlySecurityButton;
+    private Button updateButton;
     private SharedPreferences prefs;
     private String serverUrl = "";
     private String token = "";
@@ -120,6 +128,7 @@ public class MainActivity extends Activity {
     private JSONArray loadedMentions = new JSONArray();
     private int chatNumber = 1;
     private boolean pairingCodeVisible = false;
+    private boolean updateCheckRunning = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -136,6 +145,7 @@ public class MainActivity extends Activity {
             showConnect();
             autoConnectSavedDevice();
         }
+        maybeCheckForUpdates();
     }
 
     @Override
@@ -424,6 +434,12 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams securityStatusParams = matchWrap();
         securityStatusParams.topMargin = dp(10);
         securityPanel.addView(securityStatus, securityStatusParams);
+
+        updateButton = quietButton("Check updates");
+        updateButton.setOnClickListener(view -> checkForUpdates(true));
+        LinearLayout.LayoutParams updateParams = matchWrap();
+        updateParams.topMargin = dp(12);
+        securityPanel.addView(updateButton, updateParams);
         updateAccessModeUi();
 
         LinearLayout chatSurface = new LinearLayout(this);
@@ -988,6 +1004,178 @@ public class MainActivity extends Activity {
         }
         if (accessModeHint != null) {
             accessModeHint.setText("Stay near your Mac for first setup. Continue will find Codex on this Wi-Fi and ask your Mac to show a one-time code.");
+        }
+    }
+
+    private void maybeCheckForUpdates() {
+        long now = System.currentTimeMillis();
+        long lastCheck = prefs.getLong("last_update_check_at", 0);
+        if (now - lastCheck < 24L * 60L * 60L * 1000L) return;
+        prefs.edit().putLong("last_update_check_at", now).apply();
+        checkForUpdates(false);
+    }
+
+    private void checkForUpdates(boolean manual) {
+        if (updateCheckRunning) return;
+        updateCheckRunning = true;
+        if (manual && updateButton != null) updateButton.setText("Checking...");
+
+        new Thread(() -> {
+            try {
+                UpdateInfo update = fetchLatestUpdate();
+                int currentVersion = currentVersionCode();
+                if (update.versionCode <= currentVersion) {
+                    runOnUiThread(() -> {
+                        if (manual) Toast.makeText(this, "Codex Relay is up to date.", Toast.LENGTH_SHORT).show();
+                    });
+                    return;
+                }
+
+                runOnUiThread(() -> Toast.makeText(this, "Update available. Downloading Codex Relay " + update.versionName + "...", Toast.LENGTH_LONG).show());
+                File apk = downloadUpdate(update);
+                runOnUiThread(() -> openApkInstaller(apk));
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    if (manual) Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
+                });
+            } finally {
+                runOnUiThread(() -> {
+                    updateCheckRunning = false;
+                    if (updateButton != null) updateButton.setText("Check updates");
+                });
+            }
+        }).start();
+    }
+
+    private UpdateInfo fetchLatestUpdate() throws Exception {
+        URL url = new URL(UPDATE_RELEASE_URL);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(10000);
+        connection.setReadTimeout(15000);
+        connection.setRequestProperty("Accept", "application/vnd.github+json");
+        connection.setRequestProperty("User-Agent", "Codex-Relay-Android/" + currentVersionName());
+
+        int status = connection.getResponseCode();
+        String response = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
+        if (status == 404) throw new Exception("No app update release is available yet.");
+        if (status < 200 || status >= 300) throw new Exception("Update check failed with " + status + ".");
+
+        JSONObject release = new JSONObject(response);
+        String body = release.optString("body", "");
+        int versionCode = extractVersionCode(body);
+        String versionName = extractVersionName(body, release.optString("tag_name", "latest"));
+        String apkUrl = "";
+        JSONArray assets = release.optJSONArray("assets");
+        if (assets != null) {
+            for (int index = 0; index < assets.length(); index++) {
+                JSONObject asset = assets.optJSONObject(index);
+                if (asset == null) continue;
+                String name = asset.optString("name", "");
+                if (!name.endsWith(".apk")) continue;
+                apkUrl = asset.optString("browser_download_url", "");
+                break;
+            }
+        }
+        if (versionCode <= 0) throw new Exception("Latest release is missing versionCode.");
+        if (apkUrl.trim().isEmpty()) throw new Exception("Latest release does not include an APK.");
+        return new UpdateInfo(versionCode, versionName, apkUrl);
+    }
+
+    private File downloadUpdate(UpdateInfo update) throws Exception {
+        URL url = new URL(update.apkUrl);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(15000);
+        connection.setReadTimeout(120000);
+        connection.setRequestProperty("User-Agent", "Codex-Relay-Android/" + currentVersionName());
+
+        int status = connection.getResponseCode();
+        if (status < 200 || status >= 300) throw new Exception("Update download failed with " + status + ".");
+
+        File directory = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+        if (directory == null && getFilesDir() != null) directory = getFilesDir();
+        if (directory == null) throw new Exception("Cannot prepare update download.");
+        if (!directory.exists() && !directory.mkdirs()) throw new Exception("Cannot create update folder.");
+
+        File apk = new File(directory, "codex-relay-" + update.versionCode + ".apk");
+        try (InputStream in = connection.getInputStream(); FileOutputStream out = new FileOutputStream(apk)) {
+            byte[] buffer = new byte[16 * 1024];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+        }
+        return apk;
+    }
+
+    private void openApkInstaller(File apk) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getPackageManager().canRequestPackageInstalls()) {
+            Toast.makeText(this, "Allow Codex Relay to install updates, then tap Check updates again.", Toast.LENGTH_LONG).show();
+            Intent settings = new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES);
+            settings.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(settings);
+            return;
+        }
+
+        Uri apkUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", apk);
+        Intent install = new Intent(Intent.ACTION_VIEW);
+        install.setDataAndType(apkUri, "application/vnd.android.package-archive");
+        install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        install.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(install);
+    }
+
+    private int currentVersionCode() throws Exception {
+        PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) return (int) info.getLongVersionCode();
+        return info.versionCode;
+    }
+
+    private String currentVersionName() {
+        try {
+            PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
+            return info.versionName == null ? "unknown" : info.versionName;
+        } catch (Exception ignored) {
+            return "unknown";
+        }
+    }
+
+    private int extractVersionCode(String body) {
+        String marker = "versionCode:";
+        int index = body.indexOf(marker);
+        if (index < 0) return 0;
+        int start = index + marker.length();
+        StringBuilder digits = new StringBuilder();
+        while (start < body.length()) {
+            char value = body.charAt(start++);
+            if (Character.isDigit(value)) digits.append(value);
+            else if (digits.length() > 0) break;
+        }
+        if (digits.length() == 0) return 0;
+        return Integer.parseInt(digits.toString());
+    }
+
+    private String extractVersionName(String body, String fallback) {
+        String marker = "versionName:";
+        int index = body.indexOf(marker);
+        if (index < 0) return fallback;
+        int start = index + marker.length();
+        int end = body.indexOf('\n', start);
+        if (end < 0) end = body.length();
+        String value = body.substring(start, end).trim();
+        return value.isEmpty() ? fallback : value;
+    }
+
+    private static final class UpdateInfo {
+        final int versionCode;
+        final String versionName;
+        final String apkUrl;
+
+        UpdateInfo(int versionCode, String versionName, String apkUrl) {
+            this.versionCode = versionCode;
+            this.versionName = versionName;
+            this.apkUrl = apkUrl;
         }
     }
 
