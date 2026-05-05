@@ -24,6 +24,7 @@ const notifyButton = document.querySelector('#notifyButton');
 const shell = document.querySelector('.shell');
 const clearPairingButton = document.querySelector('#clearPairingButton');
 const pairingRequestPanel = document.querySelector('#pairingRequestPanel');
+const pairingRequestTitle = document.querySelector('#pairingRequestTitle');
 const pairingRequestDevice = document.querySelector('#pairingRequestDevice');
 const pairingRequestCode = document.querySelector('#pairingRequestCode');
 const confirmPairingRequest = document.querySelector('#confirmPairingRequest');
@@ -54,7 +55,7 @@ let visiblePairingRequest = null;
 
 localStorage.removeItem('codexRemoteToken');
 
-clearPairingButton.addEventListener('click', () => {
+clearPairingButton?.addEventListener('click', () => {
   pairingCodeInput.value = '';
   pairingCodeInput.focus();
 });
@@ -96,7 +97,7 @@ if (deviceToken) {
 pollPairingRequest();
 window.setInterval(pollPairingRequest, 2500);
 
-loginForm.addEventListener('submit', async (event) => {
+loginForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
     await pairDevice();
@@ -106,7 +107,7 @@ loginForm.addEventListener('submit', async (event) => {
   }
 });
 
-pairingCodeInput.addEventListener('input', () => {
+pairingCodeInput?.addEventListener('input', () => {
   const digits = pairingCodeInput.value.replace(/\D/g, '').slice(0, 8);
   pairingCodeInput.value = digits.length > 4 ? `${digits.slice(0, 4)} ${digits.slice(4)}` : digits;
 });
@@ -192,8 +193,8 @@ async function unlockChat() {
   setConnecting(true);
   setStatus('Checking', 'busy');
   if (!deviceToken) {
-    setStatus('Locked', 'error');
-    setFormError('Enter the pairing code shown on your Mac.');
+    setStatus('Ready', 'live');
+    setFormError('');
     setConnecting(false);
     return;
   }
@@ -283,6 +284,12 @@ async function pollPairingRequest() {
   }
 
   const request = payload.request;
+  const event = payload.event;
+  if (!request && event?.type === 'connected') {
+    showPairingConnected(event);
+    return;
+  }
+
   if (!request) {
     visiblePairingRequest = null;
     pairingRequestPanel?.classList.add('hidden');
@@ -290,11 +297,32 @@ async function pollPairingRequest() {
   }
 
   visiblePairingRequest = request;
+  pairingRequestPanel?.classList.remove('is-connected');
+  pairingRequestTitle.textContent = request.confirmed ? 'Waiting for device to finish' : 'Nearby device wants to pair';
   pairingRequestDevice.textContent = request.deviceName || 'Android phone';
   pairingRequestCode.textContent = request.code || '0000 0000';
   confirmPairingRequest.textContent = request.confirmed ? 'Confirmed' : 'Confirm';
   confirmPairingRequest.disabled = Boolean(request.confirmed);
+  confirmPairingRequest.classList.remove('hidden');
+  cancelPairingRequest.classList.remove('hidden');
   pairingRequestPanel?.classList.remove('hidden');
+}
+
+function showPairingConnected(event) {
+  visiblePairingRequest = null;
+  pairingRequestPanel?.classList.add('is-connected');
+  pairingRequestTitle.textContent = 'Device connected';
+  pairingRequestDevice.textContent = event.deviceName || 'Android phone';
+  pairingRequestCode.textContent = 'Connected';
+  confirmPairingRequest.classList.add('hidden');
+  cancelPairingRequest.classList.add('hidden');
+  pairingRequestPanel?.classList.remove('hidden');
+  window.setTimeout(() => {
+    pairingRequestPanel?.classList.add('hidden');
+    pairingRequestPanel?.classList.remove('is-connected');
+    confirmPairingRequest.classList.remove('hidden');
+    cancelPairingRequest.classList.remove('hidden');
+  }, 4200);
 }
 
 async function respondToPairingRequest(action) {
@@ -1091,6 +1119,7 @@ function setStatus(label, state = '') {
 }
 
 function setConnecting(isConnecting) {
+  if (!connectButton) return;
   connectButton.disabled = isConnecting;
   connectButton.innerHTML = isConnecting
     ? '<span>Pairing</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>'
@@ -1103,6 +1132,7 @@ function setComposerBusy(isBusy) {
 }
 
 function setFormError(message) {
+  if (!loginError || !pairingCodeInput) return;
   loginError.textContent = message;
   pairingCodeInput.setAttribute('aria-invalid', message ? 'true' : 'false');
 }

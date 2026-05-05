@@ -12,7 +12,7 @@
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
-    <link rel="stylesheet" href="/styles.css?v=15">
+    <link rel="stylesheet" href="/styles.css?v=16">
   </head>
   <body>
     <div class="shell">
@@ -59,10 +59,16 @@
       </header>
 
       <section class="pairing-request hidden" id="pairingRequestPanel" aria-live="polite">
+        <div class="pairing-request-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M8 3.75h8a2 2 0 0 1 2 2v12.5a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5.75a2 2 0 0 1 2-2Z" />
+            <path d="M11 17h2" />
+          </svg>
+        </div>
         <div class="pairing-request-copy">
-          <span>One-time pairing code</span>
-          <code id="pairingRequestCode">0000 0000</code>
+          <span id="pairingRequestTitle">Nearby device wants to pair</span>
           <strong id="pairingRequestDevice">Android phone</strong>
+          <code id="pairingRequestCode">0000 0000</code>
         </div>
         <div class="pairing-request-actions">
           <button class="secondary" id="cancelPairingRequest" type="button">Cancel</button>
@@ -90,68 +96,16 @@
 
       <main class="workspace">
         <section class="access" id="accessPanel" aria-labelledby="accessTitle">
-          <div class="phone-status" aria-hidden="true">
-            <span>9:41</span>
-            <div class="phone-indicators">
-              <span class="cell-bars"></span>
-              <span class="wifi-icon"></span>
-              <span class="battery-pill">100</span>
+          <article class="host-panel">
+            <div class="hero-logo" aria-hidden="true">
+              <svg viewBox="0 0 64 64">
+                <path d="m25 20 10 12-10 12" />
+                <path d="M39 40h10" />
+              </svg>
             </div>
-          </div>
-
-          <article class="unlock-panel">
-            <header class="unlock-head">
-              <div class="hero-logo" aria-hidden="true">
-                <svg viewBox="0 0 64 64">
-                  <path d="m25 20 10 12-10 12" />
-                  <path d="M39 40h10" />
-                </svg>
-              </div>
-              <div class="access-copy">
-                <h1 id="accessTitle">Codex Relay</h1>
-                <p>Connect to your Codex server running on a Mac.</p>
-              </div>
-            </header>
-
-            <form class="login" id="loginForm">
-              <div class="field-stack">
-                <label class="relay-field pairing-field" for="pairingCode">
-                  <span>Pairing code</span>
-                  <span class="field-control">
-                    <input id="pairingCode" name="pairingCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="9" pattern="[0-9 ]{8,9}" placeholder="0000 0000" required>
-                    <button class="field-icon" id="clearPairingButton" type="button" aria-label="Clear pairing code">
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M18 6 6 18M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </span>
-                </label>
-                <p class="field-hint">Enter the one-time code shown on your Mac. It expires quickly and can be used once.</p>
-              </div>
-
-              <button class="primary" id="connectButton" type="submit">
-                <span>Connect to Codex</span>
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M5 12h14M13 6l6 6-6 6" />
-                </svg>
-              </button>
-
-              <p class="form-message" id="loginError" role="alert"></p>
-            </form>
-
-            <footer class="tips-row">
-              <span></span>
-              <button class="tips-button" type="button" aria-label="Open connection tips">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M9.1 9a3 3 0 1 1 4.9 2.3c-1.1.7-2 1.4-2 2.7" />
-                  <path d="M12 17h.01" />
-                  <circle cx="12" cy="12" r="10" />
-                </svg>
-                <span>Connection tips</span>
-              </button>
-              <span></span>
-            </footer>
-
+            <p class="host-kicker">Codex Relay</p>
+            <h1 id="accessTitle">Ready for nearby pairing</h1>
+            <p>Open the Android app on the same Wi-Fi and tap Continue. Pairing requests appear here for approval.</p>
             <span class="sr-only" id="workspaceName">Loading</span>
           </article>
         </section>
@@ -195,6 +149,6 @@
         </section>
       </main>
     </div>
-    <script src="/app.js?v=15" type="module"></script>
+    <script src="/app.js?v=16" type="module"></script>
   </body>
 </html>

@@ -86,6 +86,7 @@ const failedAuth = new Map();
 const pairedDevices = new Map();
 let activePairing = createPairingCode();
 let pendingPairingRequest = null;
+let latestPairingEvent = null;
 
 const app = express();
 const server = http.createServer(app);
@@ -172,6 +173,7 @@ app.post('/api/pairing/start', (req, res) => {
     createdAt: activePairing.createdAt,
     expiresAt: activePairing.createdAt + pairingCodeTtlMs
   };
+  latestPairingEvent = null;
   clearFailedAuth(ip);
   logPairingCode('Pairing code requested from nearby phone');
   res.json({
@@ -190,7 +192,12 @@ app.get('/api/pairing/request', (req, res) => {
 
   if (!pendingPairingRequest || Date.now() > pendingPairingRequest.expiresAt) {
     pendingPairingRequest = null;
-    res.json({ ok: true, request: null });
+    if (latestPairingEvent && Date.now() < latestPairingEvent.expiresAt) {
+      res.json({ ok: true, request: null, event: latestPairingEvent });
+      return;
+    }
+    latestPairingEvent = null;
+    res.json({ ok: true, request: null, event: null });
     return;
   }
 
@@ -232,6 +239,7 @@ app.post('/api/pairing/cancel', (req, res) => {
   const requestId = String(req.body?.requestId || '');
   if (pendingPairingRequest && pendingPairingRequest.id === requestId) {
     pendingPairingRequest = null;
+    latestPairingEvent = null;
     activePairing = createPairingCode();
   }
   res.json({ ok: true });
@@ -267,6 +275,14 @@ app.post('/api/pair', (req, res) => {
     userAgent: String(req.headers['user-agent'] || '').slice(0, 160)
   });
   clearFailedAuth(access.ip);
+  latestPairingEvent = {
+    type: 'connected',
+    id: pendingPairingRequest?.id || activePairing.requestId || crypto.randomBytes(8).toString('base64url'),
+    deviceName: pendingPairingRequest?.deviceName || 'Android phone',
+    ip: access.ip,
+    at: Date.now(),
+    expiresAt: Date.now() + 12_000
+  };
   pendingPairingRequest = null;
   activePairing = createPairingCode();
   logPairingCode('Next pairing code');
@@ -861,6 +877,10 @@ function cleanupSecurityState() {
 
   if (pendingPairingRequest && now > pendingPairingRequest.expiresAt) {
     pendingPairingRequest = null;
+  }
+
+  if (latestPairingEvent && now > latestPairingEvent.expiresAt) {
+    latestPairingEvent = null;
   }
 }
 

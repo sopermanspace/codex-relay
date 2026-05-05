@@ -33,6 +33,7 @@ import android.view.Window;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -103,7 +104,7 @@ public class MainActivity extends Activity {
     private LinearLayout suggestionList;
     private ProgressBar progressBar;
     private Button unlockButton;
-    private Button runButton;
+    private ImageButton runButton;
     private Button copyButton;
     private Button autoSecurityButton;
     private Button homeOnlySecurityButton;
@@ -209,7 +210,7 @@ public class MainActivity extends Activity {
 
         shell = new LinearLayout(this);
         shell.setOrientation(LinearLayout.VERTICAL);
-        shell.setPadding(dp(22), dp(28), dp(22), dp(28));
+        shell.setPadding(dp(16), dp(24), dp(16), dp(22));
         scroll.addView(shell, new ScrollView.LayoutParams(
             ScrollView.LayoutParams.MATCH_PARENT,
             ScrollView.LayoutParams.WRAP_CONTENT
@@ -231,9 +232,14 @@ public class MainActivity extends Activity {
         connectScreen.setGravity(Gravity.CENTER_HORIZONTAL);
         shell.addView(connectScreen, matchWrap());
 
-        LinearLayout.LayoutParams markParams = new LinearLayout.LayoutParams(dp(68), dp(68));
+        ImageView mark = new ImageView(this);
+        mark.setImageResource(R.drawable.codex_remote_mark);
+        mark.setContentDescription("Codex Relay");
+        mark.setPadding(dp(8), dp(8), dp(8), dp(8));
+        mark.setBackground(rounded(Color.rgb(12, 15, 19), Color.argb(130, 52, 211, 153), 2, 22));
+        LinearLayout.LayoutParams markParams = new LinearLayout.LayoutParams(dp(74), dp(74));
         markParams.topMargin = dp(18);
-        connectScreen.addView(new CommandMarkView(this), markParams);
+        connectScreen.addView(mark, markParams);
 
         TextView eyebrow = labelCaps("CODEX RELAY");
         LinearLayout.LayoutParams eyebrowParams = centerWrap();
@@ -293,14 +299,14 @@ public class MainActivity extends Activity {
         header.setGravity(Gravity.CENTER_VERTICAL);
         workspaceScreen.addView(header, matchWrap());
 
-        Button menuButton = circleButton("☰");
+        ImageButton menuButton = iconButton(R.drawable.ic_menu_24, PANEL_2, TEXT, 28, "Open projects");
         menuButton.setOnClickListener(view -> togglePanel(projectPanel));
-        LinearLayout.LayoutParams menuParams = new LinearLayout.LayoutParams(dp(56), dp(56));
+        LinearLayout.LayoutParams menuParams = new LinearLayout.LayoutParams(dp(52), dp(52));
         header.addView(menuButton, menuParams);
 
         statusPill = chatStatusPill("Ready");
-        LinearLayout.LayoutParams statusHeaderParams = new LinearLayout.LayoutParams(dp(126), dp(48));
-        statusHeaderParams.leftMargin = dp(12);
+        LinearLayout.LayoutParams statusHeaderParams = new LinearLayout.LayoutParams(dp(112), dp(46));
+        statusHeaderParams.leftMargin = dp(9);
         header.addView(statusPill, statusHeaderParams);
 
         TextView headerSpacer = new TextView(this);
@@ -309,21 +315,21 @@ public class MainActivity extends Activity {
         LinearLayout headerActions = new LinearLayout(this);
         headerActions.setOrientation(LinearLayout.HORIZONTAL);
         headerActions.setGravity(Gravity.CENTER_VERTICAL);
-        headerActions.setPadding(dp(8), dp(4), dp(8), dp(4));
-        headerActions.setBackground(rounded(PANEL_2, Color.argb(54, 250, 250, 250), 1, 28));
-        header.addView(headerActions, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(58)));
+        headerActions.setPadding(dp(5), dp(4), dp(5), dp(4));
+        headerActions.setBackground(rounded(PANEL_2, Color.argb(50, 250, 250, 250), 1, 26));
+        header.addView(headerActions, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(52)));
 
-        Button newChat = iconTextButton("+");
+        ImageButton newChat = iconButton(R.drawable.ic_plus_24, Color.TRANSPARENT, TEXT, 22, "New chat");
         newChat.setOnClickListener(view -> startNewChat());
-        headerActions.addView(newChat, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        headerActions.addView(newChat, new LinearLayout.LayoutParams(dp(40), dp(40)));
 
-        Button settingsButton = iconTextButton("◌");
+        ImageButton settingsButton = iconButton(R.drawable.ic_shield_24, Color.TRANSPARENT, TEXT, 22, "Security");
         settingsButton.setOnClickListener(view -> togglePanel(securityPanel));
-        headerActions.addView(settingsButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        headerActions.addView(settingsButton, new LinearLayout.LayoutParams(dp(40), dp(40)));
 
-        Button moreButton = iconTextButton("⋯");
+        ImageButton moreButton = iconButton(R.drawable.ic_more_horiz_24, Color.TRANSPARENT, TEXT, 22, "More");
         moreButton.setOnClickListener(view -> togglePanel(projectPanel));
-        headerActions.addView(moreButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        headerActions.addView(moreButton, new LinearLayout.LayoutParams(dp(40), dp(40)));
 
         chatTitle = sectionTitle("Codex Relay");
         chatTitle.setVisibility(View.GONE);
@@ -450,15 +456,15 @@ public class MainActivity extends Activity {
         LinearLayout composer = new LinearLayout(this);
         composer.setOrientation(LinearLayout.HORIZONTAL);
         composer.setGravity(Gravity.CENTER_VERTICAL);
-        composer.setPadding(dp(8), dp(8), dp(8), dp(8));
-        composer.setBackground(rounded(Color.rgb(31, 31, 31), Color.argb(58, 250, 250, 250), 1, 32));
+        composer.setPadding(dp(6), dp(6), dp(6), dp(6));
+        composer.setBackground(rounded(Color.rgb(30, 30, 31), Color.argb(64, 250, 250, 250), 1, 30));
         LinearLayout.LayoutParams composerParams = matchWrap();
         composerParams.topMargin = dp(14);
         workspaceScreen.addView(composer, composerParams);
 
-        Button addButton = iconTextButton("+");
+        ImageButton addButton = iconButton(R.drawable.ic_plus_24, Color.TRANSPARENT, TEXT, 22, "Attach");
         addButton.setOnClickListener(view -> Toast.makeText(this, "Attachments are coming next.", Toast.LENGTH_SHORT).show());
-        composer.addView(addButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        composer.addView(addButton, new LinearLayout.LayoutParams(dp(44), dp(44)));
 
         promptInput = chatInput("", "Ask Codex");
         promptInput.setSingleLine(false);
@@ -475,9 +481,9 @@ public class MainActivity extends Activity {
         composerStatus = caption("Type / for commands or @ for files.");
         composerStatus.setVisibility(View.GONE);
 
-        Button micButton = iconTextButton("mic");
+        ImageButton micButton = iconButton(R.drawable.ic_mic_24, Color.TRANSPARENT, TEXT, 22, "Voice input");
         micButton.setOnClickListener(view -> Toast.makeText(this, "Voice input is not enabled yet.", Toast.LENGTH_SHORT).show());
-        composer.addView(micButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        composer.addView(micButton, new LinearLayout.LayoutParams(dp(44), dp(44)));
 
         runButton = sendCircleButton();
         runButton.setOnClickListener(view -> runCommand());
@@ -930,7 +936,8 @@ public class MainActivity extends Activity {
     private void setBusy(boolean busy) {
         progressBar.setVisibility(busy ? View.VISIBLE : View.GONE);
         runButton.setEnabled(!busy);
-        runButton.setText(busy ? "..." : "↑");
+        runButton.setImageResource(busy ? R.drawable.ic_loader_24 : R.drawable.ic_send_24);
+        runButton.setColorFilter(busy ? ACCENT : Color.rgb(5, 5, 5));
         statusPill.setText(busy ? "Thinking" : "Ready");
         if (composerStatus != null) {
             composerStatus.setText(busy ? "Codex is responding..." : "Type / for commands or @ for files.");
@@ -1560,11 +1567,11 @@ public class MainActivity extends Activity {
         ));
         if (onClick != null) row.setOnClickListener(view -> onClick.run());
 
-        TextView folderIcon = new TextView(this);
-        folderIcon.setText(selected ? "●" : "○");
-        folderIcon.setTextColor(selected ? ACCENT : SOFT);
-        folderIcon.setTextSize(18);
-        row.addView(folderIcon, new LinearLayout.LayoutParams(dp(28), LinearLayout.LayoutParams.WRAP_CONTENT));
+        ImageView folderIcon = new ImageView(this);
+        folderIcon.setImageResource(selected ? R.drawable.ic_check_24 : R.drawable.ic_folder_24);
+        folderIcon.setColorFilter(selected ? ACCENT : SOFT);
+        folderIcon.setPadding(dp(3), dp(3), dp(3), dp(3));
+        row.addView(folderIcon, new LinearLayout.LayoutParams(dp(32), dp(32)));
 
         LinearLayout texts = new LinearLayout(this);
         texts.setOrientation(LinearLayout.VERTICAL);
@@ -1720,35 +1727,20 @@ public class MainActivity extends Activity {
         return button;
     }
 
-    private Button circleButton(String text) {
-        Button button = new Button(this);
-        button.setText(text);
-        button.setAllCaps(false);
-        button.setTextColor(TEXT);
-        button.setTextSize(26);
-        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        button.setBackground(rounded(PANEL_2, Color.argb(58, 250, 250, 250), 1, 28));
+    private ImageButton iconButton(int iconRes, int fill, int tint, int radius, String description) {
+        ImageButton button = new ImageButton(this);
+        button.setImageResource(iconRes);
+        button.setColorFilter(tint);
+        button.setContentDescription(description);
+        button.setPadding(dp(11), dp(11), dp(11), dp(11));
+        button.setScaleType(ImageView.ScaleType.CENTER);
+        button.setBackground(rounded(fill, fill == Color.TRANSPARENT ? Color.TRANSPARENT : Color.argb(58, 250, 250, 250), 1, radius));
         return button;
     }
 
-    private Button iconTextButton(String text) {
-        Button button = new Button(this);
-        button.setText(text);
-        button.setAllCaps(false);
-        button.setTextColor(TEXT);
-        button.setTextSize(text.length() > 1 ? 13 : 28);
-        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        button.setBackground(rounded(Color.TRANSPARENT, Color.TRANSPARENT, 0, 24));
-        return button;
-    }
-
-    private Button sendCircleButton() {
-        Button button = new Button(this);
-        button.setText("↑");
-        button.setAllCaps(false);
-        button.setTextColor(Color.rgb(5, 5, 5));
-        button.setTextSize(24);
-        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+    private ImageButton sendCircleButton() {
+        ImageButton button = iconButton(R.drawable.ic_send_24, Color.rgb(248, 248, 248), Color.rgb(5, 5, 5), 26, "Send message");
+        button.setPadding(dp(13), dp(13), dp(13), dp(13));
         button.setBackground(rounded(Color.rgb(248, 248, 248), Color.argb(230, 255, 255, 255), 1, 26));
         return button;
     }
@@ -1770,7 +1762,7 @@ public class MainActivity extends Activity {
         TextView text = new TextView(this);
         text.setText(value);
         text.setTextColor(ACCENT);
-        text.setTextSize(20);
+        text.setTextSize(18);
         text.setGravity(Gravity.CENTER);
         text.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         text.setBackground(rounded(PANEL_2, Color.argb(58, 250, 250, 250), 1, 28));
