@@ -85,7 +85,6 @@ public class MainActivity extends Activity {
     private EditText serverInput;
     private EditText pairingCodeInput;
     private EditText promptInput;
-    private TextView statusPill;
     private TextView connectionStatus;
     private TextView resultTitle;
     private TextView resultBody;
@@ -112,6 +111,7 @@ public class MainActivity extends Activity {
     private ProgressBar progressBar;
     private Button unlockButton;
     private ImageButton runButton;
+    private ImageButton newChatButton;
     private Button copyButton;
     private Button autoSecurityButton;
     private Button homeOnlySecurityButton;
@@ -129,6 +129,7 @@ public class MainActivity extends Activity {
     private int chatNumber = 1;
     private boolean pairingCodeVisible = false;
     private boolean updateCheckRunning = false;
+    private boolean hasChatMessages = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -302,6 +303,7 @@ public class MainActivity extends Activity {
         workspaceScreen = new LinearLayout(this);
         workspaceScreen.setOrientation(LinearLayout.VERTICAL);
         workspaceScreen.setVisibility(View.GONE);
+        workspaceScreen.setMinimumHeight(getResources().getDisplayMetrics().heightPixels - dp(88));
         shell.addView(workspaceScreen, matchWrap());
 
         LinearLayout header = new LinearLayout(this);
@@ -314,11 +316,6 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams menuParams = new LinearLayout.LayoutParams(dp(52), dp(52));
         header.addView(menuButton, menuParams);
 
-        statusPill = chatStatusPill("Ready");
-        LinearLayout.LayoutParams statusHeaderParams = new LinearLayout.LayoutParams(dp(112), dp(46));
-        statusHeaderParams.leftMargin = dp(9);
-        header.addView(statusPill, statusHeaderParams);
-
         TextView headerSpacer = new TextView(this);
         header.addView(headerSpacer, new LinearLayout.LayoutParams(0, 1, 1));
 
@@ -329,16 +326,13 @@ public class MainActivity extends Activity {
         headerActions.setBackground(rounded(PANEL_2, Color.argb(50, 250, 250, 250), 1, 26));
         header.addView(headerActions, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(52)));
 
-        ImageButton newChat = iconButton(R.drawable.ic_plus_24, Color.TRANSPARENT, TEXT, 22, "New chat");
-        newChat.setOnClickListener(view -> startNewChat());
-        headerActions.addView(newChat, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        newChatButton = iconButton(R.drawable.ic_plus_24, Color.TRANSPARENT, TEXT, 22, "New chat");
+        newChatButton.setOnClickListener(view -> startNewChat());
+        newChatButton.setVisibility(View.GONE);
+        headerActions.addView(newChatButton, new LinearLayout.LayoutParams(dp(40), dp(40)));
 
-        ImageButton settingsButton = iconButton(R.drawable.ic_shield_24, Color.TRANSPARENT, TEXT, 22, "Security");
-        settingsButton.setOnClickListener(view -> togglePanel(securityPanel));
-        headerActions.addView(settingsButton, new LinearLayout.LayoutParams(dp(40), dp(40)));
-
-        ImageButton moreButton = iconButton(R.drawable.ic_more_horiz_24, Color.TRANSPARENT, TEXT, 22, "More");
-        moreButton.setOnClickListener(view -> togglePanel(projectPanel));
+        ImageButton moreButton = iconButton(R.drawable.ic_more_horiz_24, Color.TRANSPARENT, TEXT, 22, "Settings");
+        moreButton.setOnClickListener(view -> togglePanel(securityPanel));
         headerActions.addView(moreButton, new LinearLayout.LayoutParams(dp(40), dp(40)));
 
         chatTitle = sectionTitle("Codex Relay");
@@ -409,7 +403,11 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams securityParams = matchWrap();
         securityParams.topMargin = dp(12);
         workspaceScreen.addView(securityPanel, securityParams);
-        securityPanel.addView(sectionTitle("Security"), matchWrap());
+        securityPanel.addView(sectionTitle("Settings"), matchWrap());
+        TextView securityLabel = labelCaps("Security");
+        LinearLayout.LayoutParams securityLabelParams = matchWrap();
+        securityLabelParams.topMargin = dp(14);
+        securityPanel.addView(securityLabel, securityLabelParams);
 
         LinearLayout securityButtons = new LinearLayout(this);
         securityButtons.setOrientation(LinearLayout.HORIZONTAL);
@@ -472,15 +470,17 @@ public class MainActivity extends Activity {
         LinearLayout composer = new LinearLayout(this);
         composer.setOrientation(LinearLayout.HORIZONTAL);
         composer.setGravity(Gravity.CENTER_VERTICAL);
-        composer.setPadding(dp(6), dp(6), dp(6), dp(6));
-        composer.setBackground(rounded(Color.rgb(30, 30, 31), Color.argb(64, 250, 250, 250), 1, 30));
+        composer.setPadding(dp(5), dp(5), dp(5), dp(5));
+        composer.setBackground(rounded(Color.rgb(27, 27, 28), Color.argb(70, 250, 250, 250), 1, 30));
         LinearLayout.LayoutParams composerParams = matchWrap();
-        composerParams.topMargin = dp(14);
+        composerParams.topMargin = dp(10);
         workspaceScreen.addView(composer, composerParams);
 
         ImageButton addButton = iconButton(R.drawable.ic_plus_24, Color.TRANSPARENT, TEXT, 22, "Attach");
         addButton.setOnClickListener(view -> Toast.makeText(this, "Attachments are coming next.", Toast.LENGTH_SHORT).show());
-        composer.addView(addButton, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        LinearLayout.LayoutParams addParams = new LinearLayout.LayoutParams(dp(46), dp(46));
+        addParams.rightMargin = dp(2);
+        composer.addView(addButton, addParams);
 
         promptInput = chatInput("", "Ask Codex");
         promptInput.setSingleLine(false);
@@ -492,18 +492,20 @@ public class MainActivity extends Activity {
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) { updateSuggestions(s.toString()); }
             @Override public void afterTextChanged(Editable s) {}
         });
-        composer.addView(promptInput, new LinearLayout.LayoutParams(0, dp(52), 1));
+        composer.addView(promptInput, new LinearLayout.LayoutParams(0, dp(50), 1));
 
         composerStatus = caption("Type / for commands or @ for files.");
         composerStatus.setVisibility(View.GONE);
 
         ImageButton micButton = iconButton(R.drawable.ic_mic_24, Color.TRANSPARENT, TEXT, 22, "Voice input");
         micButton.setOnClickListener(view -> Toast.makeText(this, "Voice input is not enabled yet.", Toast.LENGTH_SHORT).show());
-        composer.addView(micButton, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        LinearLayout.LayoutParams micParams = new LinearLayout.LayoutParams(dp(46), dp(46));
+        micParams.leftMargin = dp(2);
+        composer.addView(micButton, micParams);
 
         runButton = sendCircleButton();
         runButton.setOnClickListener(view -> runCommand());
-        LinearLayout.LayoutParams sendParams = new LinearLayout.LayoutParams(dp(52), dp(52));
+        LinearLayout.LayoutParams sendParams = new LinearLayout.LayoutParams(dp(50), dp(50));
         sendParams.leftMargin = dp(4);
         composer.addView(runButton, sendParams);
 
@@ -954,7 +956,6 @@ public class MainActivity extends Activity {
         runButton.setEnabled(!busy);
         runButton.setImageResource(busy ? R.drawable.ic_loader_24 : R.drawable.ic_send_24);
         runButton.setColorFilter(busy ? ACCENT : Color.rgb(5, 5, 5));
-        statusPill.setText(busy ? "Thinking" : "Ready");
         if (composerStatus != null) {
             composerStatus.setText(busy ? "Codex is responding..." : "Type / for commands or @ for files.");
             composerStatus.setTextColor(SOFT);
@@ -1203,7 +1204,10 @@ public class MainActivity extends Activity {
 
     private void togglePanel(View panel) {
         if (panel == null) return;
-        panel.setVisibility(panel.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+        boolean shouldShow = panel.getVisibility() != View.VISIBLE;
+        if (panel == projectPanel && securityPanel != null) securityPanel.setVisibility(View.GONE);
+        if (panel == securityPanel && projectPanel != null) projectPanel.setVisibility(View.GONE);
+        panel.setVisibility(shouldShow ? View.VISIBLE : View.GONE);
     }
 
     private void resetChatEmpty() {
@@ -1231,6 +1235,8 @@ public class MainActivity extends Activity {
 
         chatList.addView(empty, matchWrap());
         lastOutput = "";
+        hasChatMessages = false;
+        if (newChatButton != null) newChatButton.setVisibility(View.GONE);
     }
 
     private void addMessageBubble(String message, boolean user, boolean error) {
@@ -1238,6 +1244,8 @@ public class MainActivity extends Activity {
         if (chatList.getChildCount() == 1 && "empty-state".equals(chatList.getChildAt(0).getTag())) {
             chatList.removeAllViews();
         }
+        hasChatMessages = true;
+        if (newChatButton != null) newChatButton.setVisibility(View.VISIBLE);
         chatList.setGravity(Gravity.NO_GRAVITY);
         LinearLayout row = new LinearLayout(this);
         row.setGravity(user ? Gravity.END : Gravity.START);
