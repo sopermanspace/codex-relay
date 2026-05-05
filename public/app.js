@@ -53,6 +53,11 @@ let activeAssistantMessage = null;
 let pendingAttachments = [];
 let visiblePairingRequest = null;
 
+function setPairingFocus(isFocused) {
+  shell?.classList.toggle('is-pairing', isFocused);
+  document.body.classList.toggle('is-pairing', isFocused);
+}
+
 localStorage.removeItem('codexRemoteToken');
 
 clearPairingButton?.addEventListener('click', () => {
@@ -293,10 +298,12 @@ async function pollPairingRequest() {
   if (!request) {
     visiblePairingRequest = null;
     pairingRequestPanel?.classList.add('hidden');
+    setPairingFocus(false);
     return;
   }
 
   visiblePairingRequest = request;
+  setPairingFocus(true);
   pairingRequestPanel?.classList.remove('is-connected');
   pairingRequestTitle.textContent = request.confirmed ? 'Waiting for device to finish' : 'Nearby device wants to pair';
   pairingRequestDevice.textContent = request.deviceName || 'Android phone';
@@ -310,6 +317,7 @@ async function pollPairingRequest() {
 
 function showPairingConnected(event) {
   visiblePairingRequest = null;
+  setPairingFocus(true);
   pairingRequestPanel?.classList.add('is-connected');
   pairingRequestTitle.textContent = 'Device connected';
   pairingRequestDevice.textContent = event.deviceName || 'Android phone';
@@ -320,6 +328,7 @@ function showPairingConnected(event) {
   window.setTimeout(() => {
     pairingRequestPanel?.classList.add('hidden');
     pairingRequestPanel?.classList.remove('is-connected');
+    setPairingFocus(false);
     confirmPairingRequest.classList.remove('hidden');
     cancelPairingRequest.classList.remove('hidden');
   }, 4200);
