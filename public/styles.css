@@ -563,6 +563,14 @@ svg {
   max-width: 12ch;
 }
 
+.access.has-connected-device .host-panel h1 {
+  max-width: 14ch;
+}
+
+.access.has-connected-device .host-kicker {
+  color: #7ff7cf;
+}
+
 .host-panel > p:not(.host-kicker) {
   max-width: 28rem;
   margin: 0;

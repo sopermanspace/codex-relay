@@ -16,6 +16,8 @@ const clearButton = document.querySelector('#clearButton');
 const quickKeys = document.querySelectorAll('.key-button');
 const connectButton = document.querySelector('#connectButton');
 const loginError = document.querySelector('#loginError');
+const accessTitle = document.querySelector('#accessTitle');
+const accessSubtitle = document.querySelector('#accessSubtitle');
 const workspaceName = document.querySelector('#workspaceName');
 const slashPanel = document.querySelector('#slashPanel');
 const slashList = document.querySelector('#slashList');
@@ -52,10 +54,29 @@ let activeRequest = null;
 let activeAssistantMessage = null;
 let pendingAttachments = [];
 let visiblePairingRequest = null;
+let connectedDevice = null;
 
 function setPairingFocus(isFocused) {
   shell?.classList.toggle('is-pairing', isFocused);
   document.body.classList.toggle('is-pairing', isFocused);
+}
+
+function updateConnectedDevice(device) {
+  connectedDevice = device || null;
+  accessPanel?.classList.toggle('has-connected-device', Boolean(connectedDevice));
+  if (!accessTitle || !accessSubtitle) return;
+
+  if (connectedDevice) {
+    const name = connectedDevice.deviceName || 'Android phone';
+    accessTitle.textContent = `${name} connected`;
+    accessSubtitle.textContent = 'This Mac is paired and ready to receive Codex requests from your device.';
+    workspaceName.textContent = name;
+    return;
+  }
+
+  accessTitle.textContent = 'Ready for nearby pairing';
+  accessSubtitle.textContent = 'Open the Android app on the same Wi-Fi and tap Continue. Pairing requests appear here for approval.';
+  workspaceName.textContent = 'Ready on this Mac';
 }
 
 localStorage.removeItem('codexRemoteToken');
@@ -82,7 +103,8 @@ fetch('/api/config')
   .then((response) => response.json())
   .then((config) => {
     workdirEl.textContent = config.workspaceLabel || 'Private command center';
-    workspaceName.textContent = config.workspaceLabel || 'Ready on this Mac';
+    updateConnectedDevice(config.connectedDevice);
+    if (!config.connectedDevice) workspaceName.textContent = config.workspaceLabel || 'Ready on this Mac';
   })
   .catch(() => {
     workdirEl.textContent = 'Server unavailable';
@@ -299,6 +321,7 @@ async function pollPairingRequest() {
     visiblePairingRequest = null;
     pairingRequestPanel?.classList.add('hidden');
     setPairingFocus(false);
+    updateConnectedDevice(payload.connectedDevice);
     return;
   }
 
@@ -317,6 +340,7 @@ async function pollPairingRequest() {
 
 function showPairingConnected(event) {
   visiblePairingRequest = null;
+  updateConnectedDevice(event);
   setPairingFocus(true);
   pairingRequestPanel?.classList.add('is-connected');
   pairingRequestTitle.textContent = 'Device connected';

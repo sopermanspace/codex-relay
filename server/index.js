@@ -87,6 +87,7 @@ const pairedDevices = new Map();
 let activePairing = createPairingCode();
 let pendingPairingRequest = null;
 let latestPairingEvent = null;
+let connectedDevice = null;
 
 const app = express();
 const server = http.createServer(app);
@@ -142,6 +143,7 @@ app.get('/api/config', (req, res) => {
     workspaceLabel: 'Ready on this Mac',
     pairingRequired: true,
     pairingCodeLength: 8,
+    connectedDevice: getConnectedDeviceSummary(),
     secureTransport: isSecureRequest(req),
     localNetwork: isPrivateNetworkIp(getClientIp(req))
   });
@@ -193,11 +195,11 @@ app.get('/api/pairing/request', (req, res) => {
   if (!pendingPairingRequest || Date.now() > pendingPairingRequest.expiresAt) {
     pendingPairingRequest = null;
     if (latestPairingEvent && Date.now() < latestPairingEvent.expiresAt) {
-      res.json({ ok: true, request: null, event: latestPairingEvent });
+      res.json({ ok: true, request: null, event: latestPairingEvent, connectedDevice: getConnectedDeviceSummary() });
       return;
     }
     latestPairingEvent = null;
-    res.json({ ok: true, request: null, event: null });
+    res.json({ ok: true, request: null, event: null, connectedDevice: getConnectedDeviceSummary() });
     return;
   }
 
@@ -210,7 +212,8 @@ app.get('/api/pairing/request', (req, res) => {
       code: `${activePairing.code.slice(0, 4)} ${activePairing.code.slice(4)}`,
       confirmed: Boolean(activePairing.confirmedAt),
       expiresAt: pendingPairingRequest.expiresAt
-    }
+    },
+    connectedDevice: getConnectedDeviceSummary()
   });
 });
 
@@ -268,17 +271,26 @@ app.post('/api/pair', (req, res) => {
   }
 
   const deviceToken = crypto.randomBytes(32).toString('base64url');
+  const connectedName = pendingPairingRequest?.deviceName || 'Android phone';
   pairedDevices.set(hashSecret(deviceToken), {
     createdAt: Date.now(),
     lastSeenAt: Date.now(),
     ip: access.ip,
+    deviceName: connectedName,
     userAgent: String(req.headers['user-agent'] || '').slice(0, 160)
   });
+  connectedDevice = {
+    deviceName: connectedName,
+    ip: access.ip,
+    connectedAt: Date.now(),
+    lastSeenAt: Date.now(),
+    expiresAt: Date.now() + deviceTokenTtlMs
+  };
   clearFailedAuth(access.ip);
   latestPairingEvent = {
     type: 'connected',
     id: pendingPairingRequest?.id || activePairing.requestId || crypto.randomBytes(8).toString('base64url'),
-    deviceName: pendingPairingRequest?.deviceName || 'Android phone',
+    deviceName: connectedName,
     ip: access.ip,
     at: Date.now(),
     expiresAt: Date.now() + 12_000
@@ -677,7 +689,24 @@ function isAuthorizedDeviceToken(token) {
     return false;
   }
   device.lastSeenAt = Date.now();
+  if (connectedDevice && connectedDevice.deviceName === device.deviceName) {
+    connectedDevice.lastSeenAt = device.lastSeenAt;
+  }
   return true;
+}
+
+function getConnectedDeviceSummary() {
+  if (!connectedDevice || Date.now() > connectedDevice.expiresAt) {
+    connectedDevice = null;
+    return null;
+  }
+
+  return {
+    deviceName: connectedDevice.deviceName,
+    ip: connectedDevice.ip,
+    connectedAt: connectedDevice.connectedAt,
+    lastSeenAt: connectedDevice.lastSeenAt
+  };
 }
 
 function assertSafeRemoteToken(value, isPersistent) {
@@ -873,6 +902,10 @@ function cleanupSecurityState() {
 
   for (const [tokenHash, device] of pairedDevices) {
     if (now - device.createdAt > deviceTokenTtlMs) pairedDevices.delete(tokenHash);
+  }
+
+  if (connectedDevice && now > connectedDevice.expiresAt) {
+    connectedDevice = null;
   }
 
   if (pendingPairingRequest && now > pendingPairingRequest.expiresAt) {
