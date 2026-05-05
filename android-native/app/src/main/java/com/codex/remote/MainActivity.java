@@ -926,11 +926,11 @@ public class MainActivity extends Activity {
         selectProject("New project 5", "/Users/himanshu/Documents/New project 5");
         renderDemoProjects();
         renderMentions(defaultMentions());
-        promptInput.setText("Summarize this repo and list the next three improvements.");
         renderSlashCommands(defaultSlashCommands());
         resetChatEmpty();
         addMessageBubble("Summarize this repo and list the next three improvements.", true, false);
         addMessageBubble("1. App-server command API is live.\n2. Android chat surface is ready.\n3. Next: test the APK on your phone.", false, false);
+        promptInput.setText("");
     }
 
     private void setBusy(boolean busy) {
