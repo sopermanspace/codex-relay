@@ -425,6 +425,27 @@ app.get('/api/projects', async (req, res) => {
   }
 });
 
+app.get('/api/project-chats', async (req, res) => {
+  const access = authorizeRequest(req);
+  if (!access.ok) {
+    res.status(access.status).json({ error: access.error });
+    return;
+  }
+
+  const cwd = resolveRequestedCwd(req.query?.cwd);
+  if (!cwd) {
+    res.status(400).json({ error: 'Project folder is outside the allowed roots.' });
+    return;
+  }
+
+  try {
+    const chats = await listProjectChats(cwd);
+    res.json({ ok: true, cwd, chats });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 app.post('/api/projects', async (req, res) => {
   const access = authorizeRequest(req);
   if (!access.ok) {
@@ -542,12 +563,17 @@ app.post('/api/command', async (req, res) => {
 
   const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
   const cwd = resolveRequestedCwd(req.body?.cwd);
+  const threadId = normalizeThreadId(req.body?.threadId);
   if (!prompt) {
     res.status(400).json({ error: 'Prompt is required' });
     return;
   }
   if (!cwd) {
     res.status(400).json({ error: 'Project folder is outside the allowed roots.' });
+    return;
+  }
+  if (threadId && !(await threadBelongsToCwd(threadId, cwd))) {
+    res.status(400).json({ error: 'Selected chat does not belong to this project.' });
     return;
   }
 
@@ -566,7 +592,7 @@ app.post('/api/command', async (req, res) => {
       return;
     }
 
-    const result = await runCodexExec(prompt, cwd);
+    const result = await runCodexExec(prompt, cwd, threadId);
     res.json({
       ok: result.exitCode === 0,
       exitCode: result.exitCode,
@@ -858,6 +884,15 @@ function normalizePairingCode(value) {
   return String(value || '').replace(/\D/g, '').slice(0, 8);
 }
 
+function normalizeThreadId(value) {
+  const id = String(value || '').trim();
+  return /^[a-zA-Z0-9_-]{8,80}$/.test(id) ? id : '';
+}
+
+function sqlString(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
 function isCurrentPairingCode(code) {
   if (Date.now() - activePairing.createdAt > pairingCodeTtlMs) return false;
   if (code.length !== activePairing.code.length) return false;
@@ -1144,6 +1179,69 @@ async function listDesktopCodexProjects() {
   return projects;
 }
 
+async function listProjectChats(cwd) {
+  if (!(await exists(codexStateDbPath))) return [];
+
+  const sql = `
+    select
+      id,
+      title,
+      first_user_message as firstUserMessage,
+      source,
+      model,
+      coalesce(updated_at_ms, updated_at * 1000) as updatedAt,
+      coalesce(created_at_ms, created_at * 1000) as createdAt
+    from threads
+    where archived = 0
+      and cwd = ${sqlString(cwd)}
+    order by updatedAt desc
+    limit ${Number(process.env.CODEX_MAX_PROJECT_CHATS || 20)}
+  `;
+
+  try {
+    const { stdout } = await execFileAsync('sqlite3', ['-json', codexStateDbPath, sql], {
+      timeout: Number(process.env.CODEX_STATE_QUERY_TIMEOUT_MS || 3000),
+      maxBuffer: 1024 * 1024
+    });
+    const rows = JSON.parse(stdout || '[]');
+    return rows.map((row) => ({
+      id: String(row.id || ''),
+      title: String(row.title || row.firstUserMessage || 'Untitled chat').slice(0, 160),
+      preview: String(row.firstUserMessage || '').slice(0, 220),
+      source: String(row.source || ''),
+      model: String(row.model || ''),
+      updatedAt: Number(row.updatedAt || 0),
+      createdAt: Number(row.createdAt || 0)
+    })).filter((row) => row.id);
+  } catch (error) {
+    console.warn(`Unable to read Codex project chats: ${error.message}`);
+    return [];
+  }
+}
+
+async function threadBelongsToCwd(threadId, cwd) {
+  if (!threadId || !(await exists(codexStateDbPath))) return false;
+  const sql = `
+    select id
+    from threads
+    where archived = 0
+      and id = ${sqlString(threadId)}
+      and cwd = ${sqlString(cwd)}
+    limit 1
+  `;
+
+  try {
+    const { stdout } = await execFileAsync('sqlite3', ['-json', codexStateDbPath, sql], {
+      timeout: Number(process.env.CODEX_STATE_QUERY_TIMEOUT_MS || 3000),
+      maxBuffer: 1024 * 128
+    });
+    const rows = JSON.parse(stdout || '[]');
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 function shouldIncludeDesktopProject(projectPath) {
   if (!projectPath) return false;
   const base = path.basename(projectPath);
@@ -1315,24 +1413,34 @@ function isPathInsideRoots(candidate, roots) {
   });
 }
 
-function runCodexExec(prompt, cwd = codexWorkdir) {
+function runCodexExec(prompt, cwd = codexWorkdir, threadId = '') {
   return (async () => {
     const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-relay-'));
     const outputFile = path.join(outputDir, 'last-message.txt');
     const imageSnapshot = await listImageArtifacts(cwd);
-    const args = [
-      'exec',
-      '--sandbox',
-      process.env.CODEX_SANDBOX || 'workspace-write',
-      '-C',
-      cwd,
-      '--color',
-      'never',
-      '--skip-git-repo-check',
-      '--output-last-message',
-      outputFile,
-      buildCodexExecPrompt(prompt)
-    ];
+    const args = threadId
+      ? [
+        'exec',
+        'resume',
+        '--skip-git-repo-check',
+        '--output-last-message',
+        outputFile,
+        threadId,
+        buildCodexExecPrompt(prompt)
+      ]
+      : [
+        'exec',
+        '--sandbox',
+        process.env.CODEX_SANDBOX || 'workspace-write',
+        '-C',
+        cwd,
+        '--color',
+        'never',
+        '--skip-git-repo-check',
+        '--output-last-message',
+        outputFile,
+        buildCodexExecPrompt(prompt)
+      ];
 
     return new Promise((resolve, reject) => {
     const child = spawn(codexCommand, args, {

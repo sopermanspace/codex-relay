@@ -32,6 +32,7 @@ import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -82,6 +83,7 @@ public class MainActivity extends Activity {
     private LinearLayout shell;
     private LinearLayout connectScreen;
     private LinearLayout workspaceScreen;
+    private ScrollView pageScroll;
     private EditText serverInput;
     private EditText pairingCodeInput;
     private EditText promptInput;
@@ -101,9 +103,12 @@ public class MainActivity extends Activity {
     private TextView composerStatus;
     private EditText projectNameInput;
     private LinearLayout projectList;
+    private LinearLayout chatThreadList;
     private LinearLayout slashCommandList;
     private LinearLayout mentionList;
     private LinearLayout chatList;
+    private LinearLayout chatSurface;
+    private LinearLayout composerBar;
     private LinearLayout projectPanel;
     private LinearLayout securityPanel;
     private LinearLayout suggestionPanel;
@@ -124,9 +129,12 @@ public class MainActivity extends Activity {
     private String selectedProjectName = "Default workspace";
     private String accessMode = "auto";
     private JSONArray loadedProjects = new JSONArray();
+    private JSONArray loadedChats = new JSONArray();
     private JSONArray loadedSlashCommands = new JSONArray();
     private JSONArray loadedMentions = new JSONArray();
     private int chatNumber = 1;
+    private String selectedThreadId = "";
+    private String selectedThreadTitle = "";
     private boolean pairingCodeVisible = false;
     private boolean updateCheckRunning = false;
     private boolean hasChatMessages = false;
@@ -162,6 +170,7 @@ public class MainActivity extends Activity {
         Window window = getWindow();
         window.setStatusBarColor(BG);
         window.setNavigationBarColor(BG);
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
     }
 
@@ -215,14 +224,14 @@ public class MainActivity extends Activity {
 
         root.addView(new AmbientGradientView(this), fullFrame());
 
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        root.addView(scroll, fullFrame());
+        pageScroll = new ScrollView(this);
+        pageScroll.setFillViewport(true);
+        root.addView(pageScroll, fullFrame());
 
         shell = new LinearLayout(this);
         shell.setOrientation(LinearLayout.VERTICAL);
         shell.setPadding(dp(16), dp(24), dp(16), dp(22));
-        scroll.addView(shell, new ScrollView.LayoutParams(
+        pageScroll.addView(shell, new ScrollView.LayoutParams(
             ScrollView.LayoutParams.MATCH_PARENT,
             ScrollView.LayoutParams.WRAP_CONTENT
         ));
@@ -398,6 +407,18 @@ public class MainActivity extends Activity {
         projectPanel.addView(projectList, projectListParams);
         renderProjectLoading();
 
+        TextView chatsLabel = sectionTitle("Recent chats");
+        LinearLayout.LayoutParams chatsLabelParams = matchWrap();
+        chatsLabelParams.topMargin = dp(18);
+        projectPanel.addView(chatsLabel, chatsLabelParams);
+
+        chatThreadList = new LinearLayout(this);
+        chatThreadList.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams chatThreadParams = matchWrap();
+        chatThreadParams.topMargin = dp(10);
+        projectPanel.addView(chatThreadList, chatThreadParams);
+        renderChatLoading("Choose a project to load chats.");
+
         securityPanel = miniPanel();
         securityPanel.setVisibility(View.GONE);
         LinearLayout.LayoutParams securityParams = matchWrap();
@@ -440,7 +461,7 @@ public class MainActivity extends Activity {
         securityPanel.addView(updateButton, updateParams);
         updateAccessModeUi();
 
-        LinearLayout chatSurface = new LinearLayout(this);
+        chatSurface = new LinearLayout(this);
         chatSurface.setOrientation(LinearLayout.VERTICAL);
         chatSurface.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams chatSurfaceParams = new LinearLayout.LayoutParams(
@@ -467,20 +488,20 @@ public class MainActivity extends Activity {
         suggestionList.setOrientation(LinearLayout.VERTICAL);
         suggestionPanel.addView(suggestionList, matchWrap());
 
-        LinearLayout composer = new LinearLayout(this);
-        composer.setOrientation(LinearLayout.HORIZONTAL);
-        composer.setGravity(Gravity.CENTER_VERTICAL);
-        composer.setPadding(dp(5), dp(5), dp(5), dp(5));
-        composer.setBackground(rounded(Color.rgb(27, 27, 28), Color.argb(70, 250, 250, 250), 1, 30));
+        composerBar = new LinearLayout(this);
+        composerBar.setOrientation(LinearLayout.HORIZONTAL);
+        composerBar.setGravity(Gravity.CENTER_VERTICAL);
+        composerBar.setPadding(dp(5), dp(5), dp(5), dp(5));
+        composerBar.setBackground(rounded(Color.rgb(27, 27, 28), Color.argb(70, 250, 250, 250), 1, 30));
         LinearLayout.LayoutParams composerParams = matchWrap();
         composerParams.topMargin = dp(10);
-        workspaceScreen.addView(composer, composerParams);
+        workspaceScreen.addView(composerBar, composerParams);
 
         ImageButton addButton = iconButton(R.drawable.ic_plus_24, Color.TRANSPARENT, TEXT, 22, "Attach");
         addButton.setOnClickListener(view -> Toast.makeText(this, "Attachments are coming next.", Toast.LENGTH_SHORT).show());
         LinearLayout.LayoutParams addParams = new LinearLayout.LayoutParams(dp(46), dp(46));
         addParams.rightMargin = dp(2);
-        composer.addView(addButton, addParams);
+        composerBar.addView(addButton, addParams);
 
         promptInput = chatInput("", "Ask Codex");
         promptInput.setSingleLine(false);
@@ -490,9 +511,12 @@ public class MainActivity extends Activity {
         promptInput.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) { updateSuggestions(s.toString()); }
-            @Override public void afterTextChanged(Editable s) {}
+            @Override public void afterTextChanged(Editable s) { scrollComposerIntoView(); }
         });
-        composer.addView(promptInput, new LinearLayout.LayoutParams(0, dp(50), 1));
+        promptInput.setOnFocusChangeListener((view, hasFocus) -> {
+            if (hasFocus) scrollComposerIntoView();
+        });
+        composerBar.addView(promptInput, new LinearLayout.LayoutParams(0, dp(50), 1));
 
         composerStatus = caption("Type / for commands or @ for files.");
         composerStatus.setVisibility(View.GONE);
@@ -501,13 +525,13 @@ public class MainActivity extends Activity {
         micButton.setOnClickListener(view -> Toast.makeText(this, "Voice input is not enabled yet.", Toast.LENGTH_SHORT).show());
         LinearLayout.LayoutParams micParams = new LinearLayout.LayoutParams(dp(46), dp(46));
         micParams.leftMargin = dp(2);
-        composer.addView(micButton, micParams);
+        composerBar.addView(micButton, micParams);
 
         runButton = sendCircleButton();
         runButton.setOnClickListener(view -> runCommand());
         LinearLayout.LayoutParams sendParams = new LinearLayout.LayoutParams(dp(50), dp(50));
         sendParams.leftMargin = dp(4);
-        composer.addView(runButton, sendParams);
+        composerBar.addView(runButton, sendParams);
 
         copyButton = quietButton("Copy last");
         copyButton.setVisibility(View.GONE);
@@ -776,6 +800,7 @@ public class MainActivity extends Activity {
         JSONObject body = new JSONObject();
         body.put("prompt", prompt);
         if (!selectedProjectPath.trim().isEmpty()) body.put("cwd", selectedProjectPath);
+        if (!selectedThreadId.trim().isEmpty()) body.put("threadId", selectedThreadId);
         byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
         try (OutputStream out = connection.getOutputStream()) {
             out.write(payload);
@@ -865,6 +890,39 @@ public class MainActivity extends Activity {
         if (status < 200 || status >= 300) throw new Exception(response.trim().isEmpty() ? "Server returned " + status + "." : response);
         JSONObject object = new JSONObject(response);
         return object.optJSONArray("projects") == null ? new JSONArray() : object.optJSONArray("projects");
+    }
+
+    private void loadProjectChats() {
+        if (serverUrl.trim().isEmpty() || token.trim().isEmpty() || selectedProjectPath.trim().isEmpty()) {
+            renderChatLoading("Choose a project to load chats.");
+            return;
+        }
+        renderChatLoading("Loading recent chats...");
+
+        new Thread(() -> {
+            try {
+                JSONArray chats = getProjectChats();
+                runOnUiThread(() -> renderProjectChats(chats));
+            } catch (Exception error) {
+                runOnUiThread(() -> renderChatError(error.getMessage()));
+            }
+        }).start();
+    }
+
+    private JSONArray getProjectChats() throws Exception {
+        String urlValue = serverUrl + "/api/project-chats?cwd=" + Uri.encode(selectedProjectPath);
+        URL url = new URL(urlValue);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(10000);
+        connection.setReadTimeout(20000);
+        setAccessHeaders(connection);
+        int status = connection.getResponseCode();
+        String response = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
+        if (status == 401) throw new Exception("Device pairing expired. Pair again from the Mac.");
+        if (status < 200 || status >= 300) throw new Exception(response.trim().isEmpty() ? "Server returned " + status + "." : response);
+        JSONObject object = new JSONObject(response);
+        return object.optJSONArray("chats") == null ? new JSONArray() : object.optJSONArray("chats");
     }
 
     private void createProjectFromInput() {
@@ -1195,6 +1253,8 @@ public class MainActivity extends Activity {
 
     private void startNewChat() {
         chatNumber += 1;
+        selectedThreadId = "";
+        selectedThreadTitle = "";
         promptInput.setText("");
         resetChatEmpty();
         setBusy(false);
@@ -1208,6 +1268,22 @@ public class MainActivity extends Activity {
         if (panel == projectPanel && securityPanel != null) securityPanel.setVisibility(View.GONE);
         if (panel == securityPanel && projectPanel != null) projectPanel.setVisibility(View.GONE);
         panel.setVisibility(shouldShow ? View.VISIBLE : View.GONE);
+        updateWorkspaceContentVisibility();
+        if (shouldShow && panel == projectPanel) loadProjectChats();
+    }
+
+    private void updateWorkspaceContentVisibility() {
+        boolean overlayOpen = (projectPanel != null && projectPanel.getVisibility() == View.VISIBLE)
+            || (securityPanel != null && securityPanel.getVisibility() == View.VISIBLE);
+        int mainVisibility = overlayOpen ? View.GONE : View.VISIBLE;
+        if (chatSurface != null) chatSurface.setVisibility(mainVisibility);
+        if (composerBar != null) composerBar.setVisibility(mainVisibility);
+        if (suggestionPanel != null && overlayOpen) suggestionPanel.setVisibility(View.GONE);
+    }
+
+    private void scrollComposerIntoView() {
+        if (pageScroll == null || composerBar == null) return;
+        pageScroll.postDelayed(() -> pageScroll.smoothScrollTo(0, composerBar.getBottom() + dp(96)), 120);
     }
 
     private void resetChatEmpty() {
@@ -1703,6 +1779,42 @@ public class MainActivity extends Activity {
         projectList.addView(projectRow("Unable to load projects", message, false, null), matchWrap());
     }
 
+    private void renderChatLoading(String message) {
+        if (chatThreadList == null) return;
+        chatThreadList.removeAllViews();
+        chatThreadList.addView(projectRow(message, "Codex desktop threads", false, null), matchWrap());
+    }
+
+    private void renderChatError(String message) {
+        if (chatThreadList == null) return;
+        chatThreadList.removeAllViews();
+        chatThreadList.addView(projectRow("Unable to load chats", message, false, null), matchWrap());
+    }
+
+    private void renderProjectChats(JSONArray chats) {
+        if (chatThreadList == null) return;
+        loadedChats = chats;
+        chatThreadList.removeAllViews();
+        if (chats.length() == 0) {
+            chatThreadList.addView(projectRow("No chats yet", "Start a task to create a Codex thread.", false, null), matchWrap());
+            return;
+        }
+
+        int count = Math.min(chats.length(), 8);
+        for (int index = 0; index < count; index++) {
+            JSONObject chat = chats.optJSONObject(index);
+            if (chat == null) continue;
+            String id = chat.optString("id", "");
+            String title = chat.optString("title", "Untitled chat");
+            String detail = relativeTime(chat.optLong("updatedAt", 0));
+            boolean selected = id.equals(selectedThreadId);
+            View row = projectRow(title, detail, selected, () -> selectProjectChat(id, title));
+            LinearLayout.LayoutParams params = matchWrap();
+            if (index > 0) params.topMargin = dp(8);
+            chatThreadList.addView(row, params);
+        }
+    }
+
     private void renderProjects(JSONArray projects) {
         if (projectList == null) return;
         loadedProjects = projects;
@@ -1792,23 +1904,56 @@ public class MainActivity extends Activity {
         setProjectSetupStatus("Selected project. Commands now run there.", false);
         if (loadedProjects.length() > 0) renderProjects(loadedProjects);
         if (projectPanel != null) projectPanel.setVisibility(View.GONE);
+        updateWorkspaceContentVisibility();
+    }
+
+    private void selectProjectChat(String id, String title) {
+        selectedThreadId = id;
+        selectedThreadTitle = title;
+        resetChatEmpty();
+        addMessageBubble("Continuing: " + title, false, false);
+        if (loadedChats.length() > 0) renderProjectChats(loadedChats);
+        if (projectPanel != null) projectPanel.setVisibility(View.GONE);
+        updateWorkspaceContentVisibility();
+        promptInput.requestFocus();
+        scrollComposerIntoView();
     }
 
     private void applyProjectSelection(String name, String path) {
+        boolean changedProject = !path.equals(selectedProjectPath);
         selectedProjectName = name;
         selectedProjectPath = path;
+        if (changedProject) {
+            selectedThreadId = "";
+            selectedThreadTitle = "";
+        }
         if (projectTitle != null) projectTitle.setText(name);
         if (projectPathLabel != null) projectPathLabel.setText(path.trim().isEmpty() ? "Server workspace" : "Selected workspace");
         if (metaLabel != null) metaLabel.setText(name);
         if (chatTitle != null) chatTitle.setText(name);
         updateChatContext();
         loadMentions();
+        loadProjectChats();
     }
 
     private void updateChatContext() {
         if (chatContextLabel != null) {
-            chatContextLabel.setText("Chat " + chatNumber + " · " + selectedProjectName);
+            String chatLabel = selectedThreadTitle.trim().isEmpty() ? "Chat " + chatNumber : selectedThreadTitle;
+            chatContextLabel.setText(chatLabel + " · " + selectedProjectName);
         }
+    }
+
+    private String relativeTime(long timestamp) {
+        if (timestamp <= 0) return "Recent Codex chat";
+        long diff = Math.max(0, System.currentTimeMillis() - timestamp);
+        long minutes = diff / 60000L;
+        if (minutes < 1) return "Just now";
+        if (minutes < 60) return minutes + " min ago";
+        long hours = minutes / 60L;
+        if (hours < 24) return hours + " hr ago";
+        long days = hours / 24L;
+        if (days < 30) return days + " days ago";
+        return "Codex chat";
     }
 
     private String joinTags(JSONArray tags) {
