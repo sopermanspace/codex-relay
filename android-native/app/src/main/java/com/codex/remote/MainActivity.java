@@ -479,12 +479,14 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams chatsLabelParams = matchWrap();
         chatsLabelParams.topMargin = dp(18);
         projectPanel.addView(chatsLabel, chatsLabelParams);
+        chatsLabel.setVisibility(View.GONE);
 
         chatThreadList = new LinearLayout(this);
         chatThreadList.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams chatThreadParams = matchWrap();
         chatThreadParams.topMargin = dp(10);
         projectPanel.addView(chatThreadList, chatThreadParams);
+        chatThreadList.setVisibility(View.GONE);
         renderChatLoading("Choose a project to load chats.");
 
         securityPanel = miniPanel();
@@ -956,7 +958,7 @@ public class MainActivity extends Activity {
     }
 
     private JSONArray getProjects() throws Exception {
-        URL url = new URL(serverUrl + "/api/projects");
+        URL url = new URL(serverUrl + "/api/projects?includeChats=1");
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod("GET");
         connection.setConnectTimeout(10000);
@@ -1035,10 +1037,11 @@ public class MainActivity extends Activity {
                 JSONObject project = createProject(name);
                 String projectName = project.optString("name", name);
                 String projectPath = project.optString("path", "");
+                String syncWarning = project.optString("syncWarning", "");
                 runOnUiThread(() -> {
                     projectNameInput.setText("");
                     selectProject(projectName, projectPath);
-                    setProjectSetupStatus("Project ready. Commands now run there.", false);
+                    setProjectSetupStatus(syncWarning.trim().isEmpty() ? "Project synced to Codex. Commands now run there." : syncWarning, !syncWarning.trim().isEmpty());
                     loadProjects();
                 });
             } catch (Exception error) {
@@ -1052,7 +1055,7 @@ public class MainActivity extends Activity {
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod("POST");
         connection.setConnectTimeout(10000);
-        connection.setReadTimeout(20000);
+        connection.setReadTimeout(600000);
         connection.setDoOutput(true);
         connection.setRequestProperty("Content-Type", "application/json");
         setAccessHeaders(connection);
@@ -1962,6 +1965,26 @@ public class MainActivity extends Activity {
             LinearLayout.LayoutParams params = matchWrap();
             if (index > 0) params.topMargin = dp(8);
             projectList.addView(row, params);
+
+            JSONArray recentChats = project.optJSONArray("recentChats");
+            if (recentChats == null || recentChats.length() == 0) continue;
+            int chatCount = Math.min(recentChats.length(), 5);
+            for (int chatIndex = 0; chatIndex < chatCount; chatIndex++) {
+                JSONObject chat = recentChats.optJSONObject(chatIndex);
+                if (chat == null) continue;
+                String chatId = chat.optString("id", "");
+                String chatTitle = chat.optString("title", "Untitled chat");
+                String chatDetail = relativeTime(chat.optLong("updatedAt", 0));
+                boolean selectedChat = chatId.equals(selectedThreadId);
+                View chatRow = projectChatRow(chatTitle, chatDetail, selectedChat, () -> {
+                    applyProjectSelection(name, path);
+                    loadProjectChat(chatId, chatTitle);
+                });
+                LinearLayout.LayoutParams chatParams = matchWrap();
+                chatParams.topMargin = dp(5);
+                chatParams.leftMargin = dp(42);
+                projectList.addView(chatRow, chatParams);
+            }
         }
     }
 
@@ -2008,6 +2031,32 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams subtitleParams = matchWrap();
         subtitleParams.topMargin = dp(2);
         texts.addView(subtitle, subtitleParams);
+        return row;
+    }
+
+    private View projectChatRow(String titleText, String detail, boolean selected, Runnable onClick) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(14), dp(9), dp(12), dp(9));
+        row.setBackground(rounded(
+            selected ? Color.argb(125, 72, 72, 72) : Color.TRANSPARENT,
+            Color.TRANSPARENT,
+            0,
+            12
+        ));
+        if (onClick != null) row.setOnClickListener(view -> onClick.run());
+
+        TextView title = new TextView(this);
+        title.setText(titleText);
+        title.setTextColor(selected ? TEXT : Color.rgb(220, 220, 224));
+        title.setTextSize(15);
+        title.setSingleLine(true);
+        row.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        TextView time = caption(detail);
+        time.setGravity(Gravity.END);
+        row.addView(time, new LinearLayout.LayoutParams(dp(72), LinearLayout.LayoutParams.WRAP_CONTENT));
         return row;
     }
 

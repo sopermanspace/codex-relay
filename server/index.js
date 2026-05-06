@@ -414,7 +414,8 @@ app.get('/api/projects', async (req, res) => {
   }
 
   try {
-    const projects = await listProjects();
+    const includeChats = req.query?.includeChats === '1' || req.query?.includeChats === 'true';
+    const projects = await listProjects({ includeChats });
     res.json({
       ok: true,
       workdir: codexWorkdir,
@@ -519,9 +520,34 @@ app.post('/api/projects', async (req, res) => {
       'utf8'
     );
 
+    let registrationChat = null;
+    let syncWarning = '';
+    if (process.env.CODEX_REGISTER_MOBILE_PROJECTS !== 'false') {
+      const previousChat = await getLatestProjectChatSummary(projectPath);
+      try {
+        await runCodexExec(
+          'Create a concise project setup summary for this new workspace. Do not edit files.',
+          projectPath
+        );
+        registrationChat = await findNewOrUpdatedProjectChat(projectPath, previousChat, Date.now() - 600000);
+      } catch (error) {
+        syncWarning = `Project folder was created, but Codex registration failed: ${error.message}`;
+      }
+    }
+
+    const project = await projectMeta(projectPath);
+    if (registrationChat) {
+      project.source = 'codex';
+      project.threadCount = 1;
+      project.recentChats = [registrationChat];
+    }
+    if (syncWarning) project.syncWarning = syncWarning;
+
     res.status(201).json({
       ok: true,
-      project: await projectMeta(projectPath)
+      project,
+      registrationChat,
+      syncWarning
     });
   } catch (error) {
     if (error.code === 'EEXIST') {
@@ -1131,7 +1157,7 @@ function getProjectRoots() {
   ));
 }
 
-async function listProjects() {
+async function listProjects(options = {}) {
   const entries = [];
   const seen = new Set();
 
@@ -1170,7 +1196,26 @@ async function listProjects() {
   }
 
   entries.sort((a, b) => b.updatedAt - a.updatedAt || a.name.localeCompare(b.name));
-  return entries.slice(0, Number(process.env.CODEX_MAX_PROJECTS || 80));
+  const projects = entries.slice(0, Number(process.env.CODEX_MAX_PROJECTS || 80));
+  if (options.includeChats) {
+    await attachProjectChatPreviews(projects);
+  }
+  return projects;
+}
+
+async function attachProjectChatPreviews(projects) {
+  const previewLimit = Number(process.env.CODEX_PROJECT_CHAT_PREVIEW_LIMIT || 5);
+  for (const project of projects) {
+    if (!project?.path) continue;
+    const chats = await listProjectChats(project.path);
+    project.recentChats = chats.slice(0, previewLimit);
+    if (chats.length > 0) {
+      project.threadCount = Number(project.threadCount || chats.length);
+      if (project.source !== 'codex' && !project.tags.includes('Codex')) {
+        project.tags = ['Codex', ...project.tags];
+      }
+    }
+  }
 }
 
 async function listDesktopCodexProjects() {
