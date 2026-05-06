@@ -113,6 +113,7 @@ public class MainActivity extends Activity {
     private LinearLayout suggestionPanel;
     private LinearLayout suggestionList;
     private ProgressBar progressBar;
+    private FrameLayout.LayoutParams progressParams;
     private Button unlockButton;
     private ImageButton runButton;
     private ImageButton newChatButton;
@@ -276,9 +277,42 @@ public class MainActivity extends Activity {
 
         progressBar = new ProgressBar(this);
         progressBar.setVisibility(View.GONE);
-        FrameLayout.LayoutParams progressParams = new FrameLayout.LayoutParams(dp(38), dp(38), Gravity.TOP | Gravity.END);
+        progressParams = new FrameLayout.LayoutParams(dp(38), dp(38), Gravity.TOP | Gravity.END);
         progressParams.setMargins(0, dp(24), dp(24), 0);
         root.addView(progressBar, progressParams);
+
+        applySafeAreaInsets(0, 0, 0, 0);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            applySafeAreaInsets(
+                insets.getSystemWindowInsetTop(),
+                insets.getSystemWindowInsetBottom(),
+                insets.getSystemWindowInsetLeft(),
+                insets.getSystemWindowInsetRight()
+            );
+            return insets;
+        });
+        root.requestApplyInsets();
+    }
+
+    private void applySafeAreaInsets(int top, int bottom, int left, int right) {
+        int systemInsetTop = Math.max(top, 0);
+        int systemInsetBottom = Math.max(bottom, 0);
+        int systemInsetLeft = Math.max(left, 0);
+        int systemInsetRight = Math.max(right, 0);
+
+        if (shell != null) {
+            shell.setPadding(
+                systemInsetLeft + dp(16),
+                Math.max(dp(24), systemInsetTop + dp(16)),
+                systemInsetRight + dp(16),
+                Math.max(dp(22), systemInsetBottom + dp(16))
+            );
+        }
+
+        if (progressParams != null) {
+            progressParams.setMargins(0, Math.max(dp(24), systemInsetTop + dp(16)), systemInsetRight + dp(24), 0);
+            progressBar.setLayoutParams(progressParams);
+        }
     }
 
     private void buildConnectScreen() {
@@ -794,6 +828,8 @@ public class MainActivity extends Activity {
                 boolean ok = response.optBoolean("ok", false);
                 String output = response.optString("output", "");
                 JSONArray artifacts = response.optJSONArray("artifacts");
+                String responseThreadId = response.optString("threadId", selectedThreadId);
+                String responseThreadTitle = response.optString("threadTitle", selectedThreadTitle);
                 int artifactCount = artifacts == null ? 0 : artifacts.length();
                 if (output.trim().isEmpty()) {
                     output = ok && artifactCount > 0
@@ -803,10 +839,18 @@ public class MainActivity extends Activity {
                 final String resultTitleText = ok ? "Completed in " + seconds + "s" : "Finished with exit code " + response.optInt("exitCode", -1);
                 final String resultOutputText = output;
                 final JSONArray resultArtifacts = artifacts == null ? new JSONArray() : artifacts;
+                final String resultThreadId = responseThreadId == null ? "" : responseThreadId;
+                final String resultThreadTitle = responseThreadTitle == null ? "" : responseThreadTitle;
                 runOnUiThread(() -> {
+                    if (!resultThreadId.trim().isEmpty()) {
+                        selectedThreadId = resultThreadId;
+                        if (!resultThreadTitle.trim().isEmpty()) selectedThreadTitle = resultThreadTitle;
+                        updateChatContext();
+                    }
                     removeLastAssistantPlaceholder();
                     addAssistantResult(resultOutputText, resultArtifacts, !ok);
                     setResult(resultTitleText, buildResultSummary(resultOutputText, resultArtifacts), !ok);
+                    loadProjectChats();
                     notifyTaskDone(resultTitleText, ok ? "Codex finished on your Mac." : "Codex needs attention.");
                 });
             } catch (Exception error) {
@@ -959,6 +1003,25 @@ public class MainActivity extends Activity {
         return object.optJSONArray("chats") == null ? new JSONArray() : object.optJSONArray("chats");
     }
 
+    private JSONObject getProjectChat(String threadId) throws Exception {
+        String urlValue = serverUrl
+            + "/api/project-chats/"
+            + Uri.encode(threadId)
+            + "?cwd="
+            + Uri.encode(selectedProjectPath);
+        URL url = new URL(urlValue);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("GET");
+        connection.setConnectTimeout(10000);
+        connection.setReadTimeout(20000);
+        setAccessHeaders(connection);
+        int status = connection.getResponseCode();
+        String response = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
+        if (status == 401) throw new Exception("Device pairing expired. Pair again from the Mac.");
+        if (status < 200 || status >= 300) throw new Exception(response.trim().isEmpty() ? "Server returned " + status + "." : response);
+        return new JSONObject(response);
+    }
+
     private void createProjectFromInput() {
         String name = projectNameInput.getText().toString().trim();
         if (name.isEmpty()) {
@@ -1044,10 +1107,10 @@ public class MainActivity extends Activity {
     }
 
     private void setBusy(boolean busy) {
-        progressBar.setVisibility(busy ? View.VISIBLE : View.GONE);
+        progressBar.setVisibility(View.GONE);
         runButton.setEnabled(!busy);
-        runButton.setImageResource(busy ? R.drawable.ic_loader_24 : R.drawable.ic_send_24);
-        runButton.setColorFilter(busy ? ACCENT : Color.rgb(5, 5, 5));
+        runButton.setImageResource(R.drawable.ic_send_24);
+        runButton.setColorFilter(Color.rgb(5, 5, 5));
         if (composerStatus != null) {
             composerStatus.setText(busy ? "Codex is responding..." : "Type / for commands or @ for files.");
             composerStatus.setTextColor(SOFT);
@@ -1276,8 +1339,14 @@ public class MainActivity extends Activity {
         pageScroll.postDelayed(() -> pageScroll.smoothScrollTo(0, composerBar.getBottom() + dp(96)), 120);
     }
 
+    private void scrollConversationToBottom() {
+        if (pageScroll == null || composerBar == null) return;
+        pageScroll.postDelayed(() -> pageScroll.smoothScrollTo(0, composerBar.getBottom() + dp(96)), 80);
+    }
+
     private void resetChatEmpty() {
         if (chatList == null) return;
+        if (chatSurface != null) chatSurface.setGravity(Gravity.CENTER);
         chatList.removeAllViews();
         chatList.setGravity(Gravity.CENTER);
         LinearLayout empty = new LinearLayout(this);
@@ -1312,6 +1381,7 @@ public class MainActivity extends Activity {
         }
         hasChatMessages = true;
         if (newChatButton != null) newChatButton.setVisibility(View.VISIBLE);
+        if (chatSurface != null) chatSurface.setGravity(Gravity.BOTTOM);
         chatList.setGravity(Gravity.NO_GRAVITY);
         LinearLayout row = new LinearLayout(this);
         row.setGravity(user ? Gravity.END : Gravity.START);
@@ -1324,6 +1394,7 @@ public class MainActivity extends Activity {
         bubbleParams.topMargin = dp(chatList.getChildCount() == 0 ? 0 : 12);
         row.addView(bubble, bubbleParams);
         chatList.addView(row, matchWrap());
+        scrollConversationToBottom();
     }
 
     private void addAssistantResult(String message, JSONArray artifacts, boolean error) {
@@ -1373,6 +1444,7 @@ public class MainActivity extends Activity {
         bubbleParams.topMargin = dp(chatList.getChildCount() == 0 ? 0 : 12);
         row.addView(bubble, bubbleParams);
         chatList.addView(row, matchWrap());
+        scrollConversationToBottom();
 
         loadArtifactImage(artifact.optString("url", ""), preview);
     }
@@ -1805,6 +1877,56 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void loadProjectChat(String id, String title) {
+        selectedThreadId = id;
+        selectedThreadTitle = title;
+        updateChatContext();
+        if (loadedChats.length() > 0) renderProjectChats(loadedChats);
+        if (projectPanel != null) projectPanel.setVisibility(View.GONE);
+        updateWorkspaceContentVisibility();
+        resetChatEmpty();
+        addMessageBubble("Loading " + title + "...", false, false);
+
+        new Thread(() -> {
+            try {
+                JSONObject response = getProjectChat(id);
+                JSONObject chat = response.optJSONObject("chat");
+                JSONArray messages = response.optJSONArray("messages");
+                String syncedTitle = chat == null ? title : chat.optString("title", title);
+                runOnUiThread(() -> {
+                    selectedThreadTitle = syncedTitle;
+                    updateChatContext();
+                    renderChatTranscript(messages == null ? new JSONArray() : messages);
+                    promptInput.requestFocus();
+                    scrollComposerIntoView();
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    resetChatEmpty();
+                    addMessageBubble("Unable to open chat: " + error.getMessage(), false, true);
+                });
+            }
+        }).start();
+    }
+
+    private void renderChatTranscript(JSONArray messages) {
+        if (messages == null || messages.length() == 0) {
+            resetChatEmpty();
+            addMessageBubble("This Codex thread has no visible transcript yet.", false, false);
+            return;
+        }
+
+        resetChatEmpty();
+        for (int index = 0; index < messages.length(); index++) {
+            JSONObject message = messages.optJSONObject(index);
+            if (message == null) continue;
+            String role = message.optString("role", "assistant");
+            String text = message.optString("text", "").trim();
+            if (text.isEmpty()) continue;
+            addMessageBubble(text, "user".equals(role), false);
+        }
+    }
+
     private void renderProjects(JSONArray projects) {
         if (projectList == null) return;
         loadedProjects = projects;
@@ -1898,15 +2020,7 @@ public class MainActivity extends Activity {
     }
 
     private void selectProjectChat(String id, String title) {
-        selectedThreadId = id;
-        selectedThreadTitle = title;
-        resetChatEmpty();
-        addMessageBubble("Continuing: " + title, false, false);
-        if (loadedChats.length() > 0) renderProjectChats(loadedChats);
-        if (projectPanel != null) projectPanel.setVisibility(View.GONE);
-        updateWorkspaceContentVisibility();
-        promptInput.requestFocus();
-        scrollComposerIntoView();
+        loadProjectChat(id, title);
     }
 
     private void applyProjectSelection(String name, String path) {

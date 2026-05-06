@@ -29,6 +29,7 @@ const codexCommand = process.env.CODEX_COMMAND || 'codex';
 const codexWorkdir = process.env.CODEX_WORKDIR || os.homedir();
 const projectRoots = getProjectRoots();
 const codexStateDbPath = process.env.CODEX_STATE_DB || path.join(os.homedir(), '.codex', 'state_5.sqlite');
+const codexStateRoot = path.resolve(path.dirname(codexStateDbPath));
 let desktopProjectPathCache = new Set();
 const ignoredProjectDirs = new Set([
   '.git',
@@ -446,6 +447,36 @@ app.get('/api/project-chats', async (req, res) => {
   }
 });
 
+app.get('/api/project-chats/:threadId', async (req, res) => {
+  const access = authorizeRequest(req);
+  if (!access.ok) {
+    res.status(access.status).json({ error: access.error });
+    return;
+  }
+
+  const cwd = resolveRequestedCwd(req.query?.cwd);
+  const threadId = normalizeThreadId(req.params?.threadId);
+  if (!cwd) {
+    res.status(400).json({ error: 'Project folder is outside the allowed roots.' });
+    return;
+  }
+  if (!threadId) {
+    res.status(400).json({ error: 'Chat id is required.' });
+    return;
+  }
+
+  try {
+    const chat = await getProjectChat(threadId, cwd);
+    if (!chat) {
+      res.status(404).json({ ok: false, error: 'Chat was not found for this project.' });
+      return;
+    }
+    res.json({ ok: true, cwd, chat: chat.summary, messages: chat.messages });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 app.post('/api/projects', async (req, res) => {
   const access = authorizeRequest(req);
   if (!access.ok) {
@@ -592,12 +623,19 @@ app.post('/api/command', async (req, res) => {
       return;
     }
 
+    const previousChat = threadId ? null : await getLatestProjectChatSummary(cwd);
     const result = await runCodexExec(prompt, cwd, threadId);
+    const activeChat = threadId
+      ? await getProjectChatSummary(threadId, cwd)
+      : await findNewOrUpdatedProjectChat(cwd, previousChat, startedAt);
     res.json({
       ok: result.exitCode === 0,
       exitCode: result.exitCode,
       output: result.output,
       artifacts: result.artifacts,
+      threadId: activeChat?.id || threadId || '',
+      threadTitle: activeChat?.title || '',
+      threadUpdatedAt: activeChat?.updatedAt || 0,
       cwd,
       durationMs: Date.now() - startedAt
     });
@@ -1220,8 +1258,8 @@ async function listProjectChats(cwd) {
     const rows = JSON.parse(stdout || '[]');
     return rows.map((row) => ({
       id: String(row.id || ''),
-      title: String(row.title || row.firstUserMessage || 'Untitled chat').slice(0, 160),
-      preview: String(row.firstUserMessage || '').slice(0, 220),
+      title: safeTranscriptPreview(row.title || row.firstUserMessage || 'Untitled chat', 160),
+      preview: safeTranscriptPreview(row.firstUserMessage || '', 220),
       source: String(row.source || ''),
       model: String(row.model || ''),
       updatedAt: Number(row.updatedAt || 0),
@@ -1231,6 +1269,218 @@ async function listProjectChats(cwd) {
     console.warn(`Unable to read Codex project chats: ${error.message}`);
     return [];
   }
+}
+
+async function getProjectChat(threadId, cwd) {
+  const row = await getProjectChatRow(threadId, cwd);
+  if (!row) return null;
+  return {
+    summary: projectChatSummary(row),
+    messages: await readThreadMessages(row.rolloutPath)
+  };
+}
+
+async function getProjectChatSummary(threadId, cwd) {
+  const row = await getProjectChatRow(threadId, cwd);
+  return row ? projectChatSummary(row) : null;
+}
+
+async function getLatestProjectChatSummary(cwd) {
+  const rows = await queryProjectChatRows(cwd, {
+    orderBy: 'updatedAt desc',
+    limit: 1
+  });
+  return rows[0] ? projectChatSummary(rows[0]) : null;
+}
+
+async function findNewOrUpdatedProjectChat(cwd, previousChat, commandStartedAt) {
+  const rows = await queryProjectChatRows(cwd, {
+    orderBy: 'updatedAt desc',
+    limit: 5
+  });
+  if (rows.length === 0) return null;
+
+  const graceMs = Number(process.env.CODEX_THREAD_MATCH_GRACE_MS || 5000);
+  const freshRows = rows.filter((row) => row.updatedAt >= commandStartedAt - graceMs || row.createdAt >= commandStartedAt - graceMs);
+  const changedRow = rows.find((row) => !previousChat || row.id !== previousChat.id || row.updatedAt > previousChat.updatedAt);
+  return projectChatSummary(freshRows[0] || changedRow || rows[0]);
+}
+
+async function getProjectChatRow(threadId, cwd) {
+  if (!threadId || !(await exists(codexStateDbPath))) return null;
+  const rows = await queryProjectChatRows(cwd, {
+    where: `and id = ${sqlString(threadId)}`,
+    limit: 1
+  });
+  return rows[0] || null;
+}
+
+async function queryProjectChatRows(cwd, options = {}) {
+  if (!(await exists(codexStateDbPath))) return [];
+  const sql = `
+    select
+      id,
+      title,
+      first_user_message as firstUserMessage,
+      source,
+      model,
+      rollout_path as rolloutPath,
+      coalesce(updated_at_ms, updated_at * 1000) as updatedAt,
+      coalesce(created_at_ms, created_at * 1000) as createdAt
+    from threads
+    where archived = 0
+      and cwd = ${sqlString(cwd)}
+      ${options.where || ''}
+    order by ${options.orderBy || 'updatedAt desc'}
+    limit ${Number(options.limit || process.env.CODEX_MAX_PROJECT_CHATS || 20)}
+  `;
+
+  try {
+    const { stdout } = await execFileAsync('sqlite3', ['-json', codexStateDbPath, sql], {
+      timeout: Number(process.env.CODEX_STATE_QUERY_TIMEOUT_MS || 3000),
+      maxBuffer: 1024 * 1024
+    });
+    return JSON.parse(stdout || '[]').map((row) => ({
+      id: String(row.id || ''),
+      title: safeTranscriptPreview(row.title || row.firstUserMessage || 'Untitled chat', 160),
+      preview: safeTranscriptPreview(row.firstUserMessage || '', 220),
+      source: String(row.source || ''),
+      model: String(row.model || ''),
+      rolloutPath: String(row.rolloutPath || ''),
+      updatedAt: Number(row.updatedAt || 0),
+      createdAt: Number(row.createdAt || 0)
+    })).filter((row) => row.id);
+  } catch (error) {
+    console.warn(`Unable to read Codex project chat rows: ${error.message}`);
+    return [];
+  }
+}
+
+function projectChatSummary(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    preview: row.preview,
+    source: row.source,
+    model: row.model,
+    updatedAt: row.updatedAt,
+    createdAt: row.createdAt
+  };
+}
+
+async function readThreadMessages(rolloutPath) {
+  if (!isAllowedThreadRolloutPath(rolloutPath) || !(await exists(rolloutPath))) return [];
+
+  let content = '';
+  try {
+    content = await fs.readFile(rolloutPath, 'utf8');
+  } catch (error) {
+    console.warn(`Unable to read Codex thread transcript: ${error.message}`);
+    return [];
+  }
+
+  const messages = [];
+  const maxMessages = Number(process.env.CODEX_MAX_THREAD_MESSAGES || 50);
+  for (const line of content.split('\n')) {
+    if (!line.trim()) continue;
+    const message = parseThreadMessageLine(line);
+    if (!message) continue;
+    const previous = messages[messages.length - 1];
+    if (previous && previous.role === message.role && previous.text === message.text) continue;
+    messages.push(message);
+    if (messages.length > maxMessages * 2) messages.splice(0, messages.length - maxMessages * 2);
+  }
+
+  return messages.slice(-maxMessages);
+}
+
+function parseThreadMessageLine(line) {
+  let record;
+  try {
+    record = JSON.parse(line);
+  } catch {
+    return null;
+  }
+
+  const payload = record.payload || {};
+  if (record.type === 'event_msg' && payload.type === 'user_message') {
+    return buildThreadMessage('user', payload.message, record.timestamp);
+  }
+
+  if (
+    record.type === 'response_item'
+    && payload.type === 'message'
+    && payload.role === 'assistant'
+    && payload.phase === 'final_answer'
+  ) {
+    return buildThreadMessage('assistant', extractMessageContent(payload.content), record.timestamp);
+  }
+
+  return null;
+}
+
+function buildThreadMessage(role, text, timestamp) {
+  const normalized = normalizeTranscriptText(text);
+  if (!normalized) return null;
+  return {
+    role,
+    text: normalized,
+    createdAt: timestamp || ''
+  };
+}
+
+function extractMessageContent(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter((part) => part && typeof part === 'object')
+    .map((part) => {
+      if (typeof part.text === 'string') return part.text;
+      if (typeof part.content === 'string') return part.content;
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function normalizeTranscriptText(value) {
+  if (typeof value !== 'string') return '';
+  const normalized = value
+    .replace(/<image>[\s\S]*?<\/image>/gi, '[Image]')
+    .replace(/data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[Image]')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim()
+    .slice(0, Number(process.env.CODEX_MAX_THREAD_MESSAGE_CHARS || 6000));
+  return redactSensitiveText(normalized);
+}
+
+function safeTranscriptPreview(value, limit) {
+  return redactSensitiveText(String(value || '')).slice(0, limit);
+}
+
+function redactSensitiveText(value) {
+  if (process.env.CODEX_REDACT_THREAD_SECRETS === 'false') return value;
+  return String(value || '')
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[REDACTED_PRIVATE_KEY]')
+    .replace(/\b(AKIA|ASIA)[A-Z0-9]{16}\b/g, '[REDACTED_AWS_KEY]')
+    .replace(/\b(?:sk|rk|sess|proj)-[A-Za-z0-9_-]{20,}\b/g, '[REDACTED_API_KEY]')
+    .replace(/\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}\b/g, '[REDACTED_GITHUB_TOKEN]')
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, '[REDACTED_GITHUB_TOKEN]')
+    .replace(/\bglpat-[A-Za-z0-9_-]{20,}\b/g, '[REDACTED_GITLAB_TOKEN]')
+    .replace(/\bxox[baprs]-[A-Za-z0-9-]{20,}\b/g, '[REDACTED_SLACK_TOKEN]')
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, '[REDACTED_JWT]')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b/gi, 'Bearer [REDACTED]')
+    .replace(/(^|\n)(\s*(?:[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASS|API_KEY|PRIVATE_KEY|ACCESS_KEY|AUTH)[A-Z0-9_]*\s*=\s*))([^\n]+)/gi, '$1$2[REDACTED]');
+}
+
+function isAllowedThreadRolloutPath(rolloutPath) {
+  if (typeof rolloutPath !== 'string' || rolloutPath.trim() === '') return false;
+  const resolved = path.resolve(rolloutPath);
+  const allowedRoots = [
+    codexStateRoot,
+    path.join(os.homedir(), '.codex')
+  ];
+  return isPathInsideRoots(resolved, allowedRoots);
 }
 
 async function threadBelongsToCwd(threadId, cwd) {

@@ -112,9 +112,17 @@ Copy `.env.example` or run `npm run setup`.
 
 ## GitHub Actions
 
-The **Build Android APK** workflow is manual and builds an unsigned release APK artifact. It does not publish debug APKs as public releases.
+The **Build Android APK** workflow is manual. By default it uploads the APK artifact and publishes a GitHub release that the Android app can discover from **Settings → Check updates**.
 
-If you want signed public releases, add your own signing configuration and release process. Keep signing keys out of the repo.
+For installable in-app updates, configure these GitHub Actions secrets so every release APK is signed with the same private key:
+
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEYSTORE_TYPE`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+Keep signing keys out of the repo. If the signing secrets are missing, the workflow still builds an unsigned APK artifact, but Android will not install it as an update over an existing signed app.
 
 ## Security Model
 
@@ -122,8 +130,9 @@ If you want signed public releases, add your own signing configuration and relea
 - Pairing codes are one-time, short-lived, and visible only from the Mac web UI.
 - First pairing must start from the same local network.
 - Android stores paired-device tokens with AndroidX encrypted preferences.
+- Project chat history is project-scoped and redacts common token, private-key, bearer-token, and env-secret formats before sending transcript text to the phone.
 - Remote access requires HTTPS.
-- The Android app opens configured release pages for updates; it does not download or install APKs itself.
+- The Android app checks the latest GitHub release and opens the release page for updates; Android still handles APK installation approval.
 
 ## Development
 

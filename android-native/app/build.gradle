@@ -2,6 +2,11 @@ plugins {
     id "com.android.application"
 }
 
+def hasReleaseSigning = System.getenv("ANDROID_SIGNING_STORE_FILE")
+    && System.getenv("ANDROID_SIGNING_STORE_PASSWORD")
+    && System.getenv("ANDROID_SIGNING_KEY_ALIAS")
+    && System.getenv("ANDROID_SIGNING_KEY_PASSWORD")
+
 android {
     namespace "com.codex.remote"
     compileSdk 35
@@ -10,13 +15,35 @@ android {
         buildConfig true
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(System.getenv("ANDROID_SIGNING_STORE_FILE"))
+                storePassword System.getenv("ANDROID_SIGNING_STORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_SIGNING_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_SIGNING_KEY_PASSWORD")
+                if (System.getenv("ANDROID_SIGNING_STORE_TYPE")) {
+                    storeType System.getenv("ANDROID_SIGNING_STORE_TYPE")
+                }
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
     defaultConfig {
         applicationId "com.codex.remote"
         minSdk 26
         targetSdk 35
-        versionCode 4
-        versionName "1.0.3"
-        buildConfigField "String", "UPDATE_RELEASE_URL", "\"\""
+        versionCode 5
+        versionName "1.0.4"
+        buildConfigField "String", "UPDATE_RELEASE_URL", "\"https://api.github.com/repos/sopermanspace/codex-relay/releases/latest\""
     }
 }
 

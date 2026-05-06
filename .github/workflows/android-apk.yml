@@ -2,9 +2,18 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish a GitHub release for in-app updates"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   release-apk:
@@ -26,13 +35,71 @@ jobs:
         with:
           gradle-version: "8.10.2"
 
+      - name: Prepare signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEYSTORE_TYPE: ${{ secrets.ANDROID_KEYSTORE_TYPE }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "Release signing secrets are not configured; building an unsigned release APK."
+            exit 0
+          fi
+          echo "::add-mask::$ANDROID_KEYSTORE_PASSWORD"
+          echo "::add-mask::$ANDROID_KEY_ALIAS"
+          echo "::add-mask::$ANDROID_KEY_PASSWORD"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/codex-relay-release.jks"
+          {
+            echo "ANDROID_SIGNING_STORE_FILE=$RUNNER_TEMP/codex-relay-release.jks"
+            echo "ANDROID_SIGNING_STORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD"
+            echo "ANDROID_SIGNING_STORE_TYPE=${ANDROID_KEYSTORE_TYPE:-jks}"
+            echo "ANDROID_SIGNING_KEY_ALIAS=$ANDROID_KEY_ALIAS"
+            echo "ANDROID_SIGNING_KEY_PASSWORD=$ANDROID_KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
       - name: Build release APK
         working-directory: android-native
         run: gradle assembleRelease
 
-      - name: Upload unsigned release APK
+      - name: Collect APK metadata
+        id: apk
+        run: |
+          VERSION_NAME="$(grep -E 'versionName "' android-native/app/build.gradle | sed -E 's/.*versionName "([^"]+)".*/\1/')"
+          VERSION_CODE="$(grep -E 'versionCode [0-9]+' android-native/app/build.gradle | awk '{print $2}')"
+          mkdir -p dist
+          if [ -f android-native/app/build/outputs/apk/release/app-release.apk ]; then
+            cp android-native/app/build/outputs/apk/release/app-release.apk "dist/codex-relay-v${VERSION_NAME}.apk"
+            SIGNED=true
+          else
+            cp android-native/app/build/outputs/apk/release/app-release-unsigned.apk "dist/codex-relay-v${VERSION_NAME}-unsigned.apk"
+            SIGNED=false
+          fi
+          {
+            echo "version_name=$VERSION_NAME"
+            echo "version_code=$VERSION_CODE"
+            echo "signed=$SIGNED"
+            echo "apk_path=$(ls dist/*.apk | head -1)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload release APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: codex-relay-release-unsigned-apk
-          path: android-native/app/build/outputs/apk/release/app-release-unsigned.apk
+          name: codex-relay-release-apk
+          path: dist/*.apk
           if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: ${{ inputs.publish_release == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-v${{ steps.apk.outputs.version_name }}
+          name: Codex Relay Android v${{ steps.apk.outputs.version_name }}
+          body: |
+            versionCode: ${{ steps.apk.outputs.version_code }}
+            versionName: ${{ steps.apk.outputs.version_name }}
+            signed: ${{ steps.apk.outputs.signed }}
+
+            Install the APK asset below on your Android phone. For seamless in-app updates, configure the release signing secrets so every APK is signed with the same key.
+          files: ${{ steps.apk.outputs.apk_path }}
