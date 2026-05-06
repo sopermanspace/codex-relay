@@ -6,11 +6,11 @@ Codex Relay is a local command bridge for controlling Codex from a paired Androi
 
 ## Screenshots
 
-![Codex Relay web pairing screen](docs/images/web-pairing.svg)
+![Codex Relay web pairing screen](docs/images/web-pairing.png)
 
 | Android connect | Android dashboard |
 | --- | --- |
-| ![Android connect screen](docs/images/android-connect.svg) | ![Android dashboard](docs/images/android-dashboard.svg) |
+| ![Android connect screen](docs/images/android-connect.png) | ![Android dashboard](docs/images/android-dashboard.png) |
 
 ## What You Get
 
