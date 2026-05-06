@@ -18,7 +18,7 @@ if (!isStrongToken(values.get('REMOTE_TOKEN'))) {
 }
 
 values.set('PORT', values.get('PORT') || '8787');
-values.set('HOST', values.get('HOST') || '0.0.0.0');
+values.set('HOST', values.get('HOST') || '127.0.0.1');
 values.set('CODEX_COMMAND', values.get('CODEX_COMMAND') || 'codex');
 values.set('CODEX_WORKDIR', values.get('CODEX_WORKDIR') || process.cwd());
 values.set('CODEX_PROJECT_ROOTS', values.get('CODEX_PROJECT_ROOTS') || path.dirname(process.cwd()));
@@ -30,7 +30,7 @@ const nextEnv = [
   '# Keep this file private. This secret is not shown in the mobile app.',
   `REMOTE_TOKEN=${values.get('REMOTE_TOKEN')}`,
   '',
-  '# Local app-server',
+  '# Local app-server. Keep localhost unless you are actively pairing on trusted Wi-Fi.',
   `PORT=${values.get('PORT')}`,
   `HOST=${values.get('HOST')}`,
   `CODEX_COMMAND=${values.get('CODEX_COMMAND')}`,

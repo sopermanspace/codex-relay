@@ -1,68 +1,150 @@
 # Codex Relay
 
-A native Android app plus a local app-server that lets you control Codex from your phone.
+Codex Relay is a local command bridge for controlling Codex from a paired Android phone. It includes a Node.js app-server, a polished local web pairing screen, and a native Android client.
 
-## Start
+> Security note: this project can start Codex and send commands on your Mac. Keep the server on localhost by default, pair only on trusted Wi-Fi, and use HTTPS for any remote access.
 
-```bash
-npm install
-npm run setup
-npm start
-```
+## Screenshots
 
-Keep this app-server running on your Mac. Setup prepares the local server and uses the current folder as the default Codex workspace. On first Android setup, keep your phone near the Mac on the same Wi-Fi and tap **Continue**. The Codex Relay web screen on your Mac shows a centered one-time 8-digit code; confirm it on the Mac, then enter the code on your phone. Codex itself is closed-source, so the pairing code is shown in this Relay web UI, not injected into the Codex desktop app.
+![Codex Relay web pairing screen](docs/images/web-pairing.svg)
 
-## Native Android App
+| Android connect | Android dashboard |
+| --- | --- |
+| ![Android connect screen](docs/images/android-connect.svg) | ![Android dashboard](docs/images/android-dashboard.svg) |
 
-The native app project lives in:
+## What You Get
 
-```text
-android-native/
-```
+- Local web pairing screen with one-time 8-digit pairing codes.
+- Native Android app, not a WebView shell.
+- Paired-device token auth for future reconnects.
+- Project picker, slash commands, file mentions, image attachment upload, and Codex result rendering.
+- Safe open-source defaults: localhost server binding, ignored `.env`, HTTPS-required remote mode, and no auto-installed APK updates.
 
-It is a real Android app named **Codex Relay** with its own launcher icon, generated character artwork, native connect screen, Relay Dashboard, and clean Codex result rendering. It does not use WebView.
+## Requirements
 
-Build after installing Android Studio or a working JDK/Gradle setup:
+- macOS or Linux host with Node.js 20+.
+- Codex CLI installed and available as `codex`.
+- Android Studio, or JDK plus Gradle, to build the Android app locally.
+- Phone and computer on the same trusted Wi-Fi for first pairing.
 
-```bash
-cd android-native
-./build-apk.sh
-```
+## Quick Start
 
-This machine currently reports no Java runtime, so APK compilation is blocked here until Android tooling is installed.
+1. Install dependencies:
 
-No-install workaround: push this repo to GitHub and run **Build Android APK** from the Actions tab. The workflow builds the native APK in GitHub Actions and uploads `codex-remote-debug-apk` as a downloadable artifact.
+   ```bash
+   npm install
+   ```
 
-The launcher logo is available as:
+2. Generate a private local `.env`:
 
-- `public/brand/codex-remote-logo.svg`
-- `public/brand/codex-remote-logo.png`
+   ```bash
+   npm run setup
+   ```
 
-Regenerate Android PNG icons after logo edits:
+3. For browser-only local testing, start the server:
 
-```bash
-npm run build:icons
-```
+   ```bash
+   npm start
+   ```
 
-## Use From Anywhere
+   Open `http://localhost:8787`.
 
-Use **Home network** in the Android app when your phone and Mac are on the same trusted Wi-Fi. The first setup discovers the Mac locally on the same network segment, then stores a private device key on the phone so future launches reconnect automatically.
+4. To pair an Android phone on trusted Wi-Fi, edit `.env` and set:
 
-Use **Away from home** only with an HTTPS tunnel or reverse proxy. Do not port-forward this server directly from your router. One practical setup:
+   ```bash
+   HOST=0.0.0.0
+   ```
+
+   Then restart:
+
+   ```bash
+   npm start
+   ```
+
+5. Build and install the Android app:
+
+   ```bash
+   cd android-native
+   ./build-apk.sh
+   ```
+
+   The local debug APK is created at `android-native/app/build/outputs/apk/debug/app-debug.apk`.
+
+6. Open the Android app and tap **Continue**.
+
+7. Confirm the pairing request on the web screen on your Mac, then enter the 8-digit code shown there.
+
+After pairing, the phone stores an encrypted paired-device token and reconnects automatically while the server is reachable.
+
+## Remote Access
+
+Do not port-forward this server directly from your router.
+
+For away-from-home use, pair once nearby first, then expose the server through a trusted HTTPS tunnel or reverse proxy:
 
 ```bash
 cloudflared tunnel --url http://localhost:8787
 ```
 
-Then set these in `.env`:
+Set these values in `.env`:
 
 ```bash
 TRUST_PROXY=true
 PUBLIC_URL=https://your-secure-tunnel.example
 ```
 
-Restart with `npm start`. After the phone has paired once, it can reconnect automatically whenever the saved server address is reachable. For away-from-home use, that saved address must be an HTTPS tunnel or reverse proxy; a code by itself cannot make a private Mac reachable across the internet.
+Remote HTTP URLs are rejected by the Android app. HTTPS is required outside private local-network addresses.
 
-## Security Notes
+## Configuration
 
-This controls a shell session on your Mac. Pairing codes are one-time, short-lived, rate-limited, and exchanged for a random device key stored on the phone. Use HTTPS for remote access, avoid direct internet exposure, and prefer a trusted tunnel or reverse proxy. Nearby discovery removes manual URL entry for first setup, but it does not replace TLS for hostile networks or the need for a reachable HTTPS tunnel when you are away.
+Copy `.env.example` or run `npm run setup`.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `REMOTE_TOKEN` | generated | Private legacy token. Device tokens are preferred. |
+| `PORT` | `8787` | App-server port. |
+| `HOST` | `127.0.0.1` | Bind address. Use `0.0.0.0` only for trusted Wi-Fi pairing. |
+| `CODEX_COMMAND` | `codex` | Command used to start Codex. |
+| `CODEX_WORKDIR` | current folder | Default workspace. |
+| `CODEX_PROJECT_ROOTS` | parent folder | Folders exposed in the project picker. |
+| `TRUST_PROXY` | `false` | Trust `X-Forwarded-Proto` only behind your HTTPS proxy. |
+| `PUBLIC_URL` | empty | Optional HTTPS tunnel URL for QR output. |
+
+## GitHub Actions
+
+The **Build Android APK** workflow is manual and builds an unsigned release APK artifact. It does not publish debug APKs as public releases.
+
+If you want signed public releases, add your own signing configuration and release process. Keep signing keys out of the repo.
+
+## Security Model
+
+- `.env` is ignored and should never be committed.
+- Pairing codes are one-time, short-lived, and visible only from the Mac web UI.
+- First pairing must start from the same local network.
+- Android stores paired-device tokens with AndroidX encrypted preferences.
+- Remote access requires HTTPS.
+- The Android app opens configured release pages for updates; it does not download or install APKs itself.
+
+## Development
+
+Check the server syntax:
+
+```bash
+npm run check
+```
+
+Audit production dependencies:
+
+```bash
+npm audit --omit=dev
+```
+
+Regenerate icon PNGs after editing SVG assets:
+
+```bash
+npm run build:icons
+```
+
+## License
+
+MIT

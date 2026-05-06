@@ -1,9 +1,16 @@
 node_modules/
 .env
+.env.*
+!.env.example
 .DS_Store
 npm-debug.log*
 .codex-remote.log
 android-native/.gradle/
 android-native/app/build/
+android-native/local.properties
+*.jks
+*.keystore
+*.p12
+*.pem
 artifacts/
 screenshots/

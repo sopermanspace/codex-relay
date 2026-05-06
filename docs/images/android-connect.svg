@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1280" viewBox="0 0 720 1280" role="img" aria-labelledby="title desc">
+  <title id="title">Codex Relay Android connect screen</title>
+  <desc id="desc">Native Android connection screen with a dark hero image, status text, and primary continue button.</desc>
+  <defs>
+    <radialGradient id="phoneBg" cx="50%" cy="0%" r="90%">
+      <stop offset="0" stop-color="#14372b"/>
+      <stop offset=".42" stop-color="#080b0e"/>
+      <stop offset="1" stop-color="#050607"/>
+    </radialGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#000" flood-opacity=".42"/>
+    </filter>
+  </defs>
+  <rect width="720" height="1280" rx="56" fill="#050607"/>
+  <rect x="28" y="26" width="664" height="1228" rx="42" fill="url(#phoneBg)" stroke="#ffffff" stroke-opacity=".08"/>
+  <text x="76" y="102" fill="#fafafa" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="800">Codex Relay</text>
+  <text x="76" y="132" fill="#a1a1aa" font-family="Inter, Arial, sans-serif" font-size="14">Native Android client</text>
+  <g filter="url(#softShadow)">
+    <rect x="82" y="210" width="556" height="430" rx="34" fill="#0f1216" stroke="#ffffff" stroke-opacity=".1"/>
+    <circle cx="360" cy="360" r="102" fill="#102d23" stroke="#34d399" stroke-opacity=".32"/>
+    <rect x="286" y="318" width="148" height="92" rx="22" fill="#060708" stroke="#34d399" stroke-opacity=".45"/>
+    <path d="M322 366h76M322 392h46" stroke="#34d399" stroke-width="9" stroke-linecap="round"/>
+  </g>
+  <text x="360" y="738" fill="#fafafa" font-family="Inter, Arial, sans-serif" font-size="43" font-weight="850" text-anchor="middle">Command Codex</text>
+  <text x="360" y="788" fill="#fafafa" font-family="Inter, Arial, sans-serif" font-size="43" font-weight="850" text-anchor="middle">from your phone</text>
+  <text x="360" y="842" fill="#a1a1aa" font-family="Inter, Arial, sans-serif" font-size="19" text-anchor="middle">Pair nearby, then send tasks to your Mac.</text>
+  <rect x="76" y="910" width="568" height="76" rx="24" fill="#34d399"/>
+  <text x="360" y="958" fill="#020617" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="850" text-anchor="middle">Continue</text>
+  <rect x="76" y="1022" width="568" height="106" rx="24" fill="#0d1014" stroke="#ffffff" stroke-opacity=".08"/>
+  <text x="112" y="1064" fill="#f4f4f5" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="750">Security</text>
+  <text x="112" y="1100" fill="#a1a1aa" font-family="Inter, Arial, sans-serif" font-size="15">HTTP is allowed only for private Wi-Fi hosts.</text>
+</svg>

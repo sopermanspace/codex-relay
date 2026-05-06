@@ -21,7 +21,7 @@ const rootDir = path.resolve(__dirname, '..');
 const publicDir = path.join(rootDir, 'public');
 const execFileAsync = promisify(execFile);
 
-const host = process.env.HOST || '0.0.0.0';
+const host = process.env.HOST || '127.0.0.1';
 const port = Number(process.env.PORT || 8787);
 const discoveryPort = Number(process.env.REMOTE_DISCOVERY_PORT || 8788);
 const discoveryRequest = 'CODEX_RELAY_DISCOVER_V1';
@@ -187,8 +187,8 @@ app.post('/api/pairing/start', (req, res) => {
 });
 
 app.get('/api/pairing/request', (req, res) => {
-  if (!isPrivateNetworkIp(getClientIp(req)) && !isSecureRequest(req)) {
-    res.status(403).json({ error: 'Pairing requests are only visible on this Mac or trusted local network.' });
+  if (!isLoopbackIp(getClientIp(req))) {
+    res.status(403).json({ error: 'Pairing requests are only visible from this Mac.' });
     return;
   }
 
@@ -218,8 +218,8 @@ app.get('/api/pairing/request', (req, res) => {
 });
 
 app.post('/api/pairing/confirm', (req, res) => {
-  if (!isPrivateNetworkIp(getClientIp(req)) && !isSecureRequest(req)) {
-    res.status(403).json({ error: 'Pairing confirmation must happen on this Mac or trusted local network.' });
+  if (!isLoopbackIp(getClientIp(req))) {
+    res.status(403).json({ error: 'Pairing confirmation must happen on this Mac.' });
     return;
   }
 
@@ -234,8 +234,8 @@ app.post('/api/pairing/confirm', (req, res) => {
 });
 
 app.post('/api/pairing/cancel', (req, res) => {
-  if (!isPrivateNetworkIp(getClientIp(req)) && !isSecureRequest(req)) {
-    res.status(403).json({ error: 'Pairing cancellation must happen on this Mac or trusted local network.' });
+  if (!isLoopbackIp(getClientIp(req))) {
+    res.status(403).json({ error: 'Pairing cancellation must happen on this Mac.' });
     return;
   }
 
@@ -675,19 +675,25 @@ server.listen(port, host, () => {
   console.log(`Workdir: ${codexWorkdir}`);
   logPairingCode('Pairing code');
 
-  if (networkUrl) {
+  if (isLanListenerHost(host) && networkUrl) {
     console.log(`LAN URL: ${networkUrl}`);
+  } else {
+    console.log('LAN access disabled. Set HOST=0.0.0.0 only on a trusted network to pair a phone.');
   }
 
   if (publicUrl) {
     console.log(`Public URL: ${publicUrl}`);
     qrcode.generate(publicUrl, { small: true });
-  } else if (networkUrl) {
+  } else if (isLanListenerHost(host) && networkUrl) {
     qrcode.generate(networkUrl, { small: true });
   }
 });
 
-startDiscoveryResponder();
+if (isLanListenerHost(host)) {
+  startDiscoveryResponder();
+} else {
+  console.log('Nearby pairing discovery disabled while HOST is localhost-only.');
+}
 
 setInterval(cleanupSecurityState, 60_000).unref();
 setInterval(rotatePairingCodeIfExpired, 15_000).unref();
@@ -832,7 +838,7 @@ function normalizeIp(value) {
 }
 
 function isPrivateNetworkIp(ip) {
-  if (ip === '127.0.0.1' || ip === 'localhost') return true;
+  if (isLoopbackIp(ip)) return true;
   if (ip.startsWith('10.')) return true;
   if (ip.startsWith('192.168.')) return true;
   if (ip.startsWith('172.')) {
@@ -842,6 +848,14 @@ function isPrivateNetworkIp(ip) {
   if (ip.startsWith('169.254.')) return true;
   if (ip === '::1' || ip.toLowerCase().startsWith('fc') || ip.toLowerCase().startsWith('fd') || ip.toLowerCase().startsWith('fe80:')) return true;
   return false;
+}
+
+function isLoopbackIp(ip) {
+  return ip === '127.0.0.1' || ip === 'localhost' || ip === '::1';
+}
+
+function isLanListenerHost(value) {
+  return value === '0.0.0.0' || value === '::' || value === '' || value === '*';
 }
 
 function noteFailedAuth(ip) {

@@ -25,7 +25,6 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
@@ -44,14 +43,13 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import androidx.core.content.FileProvider;
+import androidx.security.crypto.EncryptedSharedPreferences;
+import androidx.security.crypto.MasterKey;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -65,8 +63,9 @@ import java.nio.charset.StandardCharsets;
 
 public class MainActivity extends Activity {
     private static final String PREFS = "codex_remote";
+    private static final String SECURE_PREFS = "codex_remote_secure";
     private static final String NOTIFICATION_CHANNEL = "codex_task_status";
-    private static final String UPDATE_RELEASE_URL = "https://api.github.com/repos/sopermanspace/codex-android-remote/releases/tags/android-latest";
+    private static final String UPDATE_RELEASE_URL = BuildConfig.UPDATE_RELEASE_URL;
     private static final int DISCOVERY_PORT = 8788;
     private static final String DISCOVERY_REQUEST = "CODEX_RELAY_DISCOVER_V1";
     private static final int BG = Color.rgb(6, 7, 10);
@@ -142,7 +141,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        prefs = createPrivatePreferences();
         configureWindow();
         configureNotifications();
         buildLayout();
@@ -155,6 +154,42 @@ public class MainActivity extends Activity {
             autoConnectSavedDevice();
         }
         maybeCheckForUpdates();
+    }
+
+    private SharedPreferences createPrivatePreferences() {
+        try {
+            MasterKey masterKey = new MasterKey.Builder(this)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build();
+            SharedPreferences securePrefs = EncryptedSharedPreferences.create(
+                this,
+                SECURE_PREFS,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            );
+            migrateLegacyPreferences(securePrefs);
+            return securePrefs;
+        } catch (Exception error) {
+            throw new IllegalStateException("Encrypted preferences are required for paired-device tokens.", error);
+        }
+    }
+
+    private void migrateLegacyPreferences(SharedPreferences securePrefs) {
+        SharedPreferences legacyPrefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        if (!legacyPrefs.contains("device_token") || securePrefs.contains("device_token")) return;
+
+        securePrefs.edit()
+            .putString("server", legacyPrefs.getString("server", ""))
+            .putString("device_token", legacyPrefs.getString("device_token", ""))
+            .putString("access_mode", legacyPrefs.getString("access_mode", "auto"))
+            .putLong("last_update_check_at", legacyPrefs.getLong("last_update_check_at", 0))
+            .apply();
+
+        legacyPrefs.edit()
+            .remove("device_token")
+            .remove("token")
+            .apply();
     }
 
     @Override
@@ -281,8 +316,7 @@ public class MainActivity extends Activity {
 
         serverLabel = formLabel("Server URL");
         connectScreen.addView(serverLabel);
-        String savedServer = prefs.getString("server", getString(R.string.default_server_url));
-        if (savedServer.contains("192.168.18.182")) savedServer = getString(R.string.default_server_url);
+        String savedServer = prefs.getString("server", "");
         serverInput = input(savedServer, false, getString(R.string.default_server_url));
         connectScreen.addView(serverInput, fieldParams());
         serverLabel.setVisibility(View.GONE);
@@ -622,7 +656,7 @@ public class MainActivity extends Activity {
                 throw new Exception("Found an unknown service on this network.");
             }
             String discoveredUrl = response.optString("url", "");
-            if (!isValidHttpUrl(discoveredUrl)) {
+            if (!isAllowedServerUrl(discoveredUrl)) {
                 throw new Exception("Codex Relay did not return a reachable address.");
             }
             return discoveredUrl;
@@ -660,8 +694,8 @@ public class MainActivity extends Activity {
     private void connect() {
         String nextServer = serverUrl.trim().isEmpty() ? serverInput.getText().toString().trim() : serverUrl.trim();
         String pairingCode = pairingCodeInput.getText().toString().replaceAll("\\D", "");
-        if (!isValidHttpUrl(nextServer)) {
-            setConnectStatus("Tap Continue near your Mac to find Codex Relay.", true);
+        if (!isAllowedServerUrl(nextServer)) {
+            setConnectStatus("Use HTTPS for remote links. HTTP is only allowed for local Wi-Fi addresses.", true);
             return;
         }
         String savedToken = prefs.getString("device_token", "");
@@ -708,7 +742,7 @@ public class MainActivity extends Activity {
     private void autoConnectSavedDevice() {
         String savedServer = prefs.getString("server", "").trim();
         String savedToken = prefs.getString("device_token", "").trim();
-        if (!isValidHttpUrl(savedServer) || savedToken.isEmpty()) return;
+        if (!isAllowedServerUrl(savedServer) || savedToken.isEmpty()) return;
 
         serverUrl = trimSlash(savedServer);
         token = savedToken;
@@ -997,9 +1031,9 @@ public class MainActivity extends Activity {
     }
 
     private void showDemoDashboard() {
-        serverUrl = "http://192.168.18.182:8787";
+        serverUrl = "http://192.168.1.10:8787";
         showWorkspace();
-        selectProject("New project 5", "/Users/himanshu/Documents/New project 5");
+        selectProject("Mobile assistant", "/Users/you/Documents/mobile-assistant");
         renderDemoProjects();
         renderMentions(defaultMentions());
         renderSlashCommands(defaultSlashCommands());
@@ -1090,9 +1124,8 @@ public class MainActivity extends Activity {
                     return;
                 }
 
-                runOnUiThread(() -> Toast.makeText(this, "Update available. Downloading Codex Relay " + update.versionName + "...", Toast.LENGTH_LONG).show());
-                File apk = downloadUpdate(update);
-                runOnUiThread(() -> openApkInstaller(apk));
+                runOnUiThread(() -> Toast.makeText(this, "Update available. Opening Codex Relay " + update.versionName + "...", Toast.LENGTH_LONG).show());
+                runOnUiThread(() -> openReleasePage(update.releaseUrl));
             } catch (Exception error) {
                 runOnUiThread(() -> {
                     if (manual) Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
@@ -1107,6 +1140,13 @@ public class MainActivity extends Activity {
     }
 
     private UpdateInfo fetchLatestUpdate() throws Exception {
+        if (UPDATE_RELEASE_URL.trim().isEmpty()) {
+            throw new Exception("Update checks are not configured for this build.");
+        }
+        if (!UPDATE_RELEASE_URL.startsWith("https://")) {
+            throw new Exception("Update checks require an HTTPS release URL.");
+        }
+
         URL url = new URL(UPDATE_RELEASE_URL);
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod("GET");
@@ -1124,65 +1164,15 @@ public class MainActivity extends Activity {
         String body = release.optString("body", "");
         int versionCode = extractVersionCode(body);
         String versionName = extractVersionName(body, release.optString("tag_name", "latest"));
-        String apkUrl = "";
-        JSONArray assets = release.optJSONArray("assets");
-        if (assets != null) {
-            for (int index = 0; index < assets.length(); index++) {
-                JSONObject asset = assets.optJSONObject(index);
-                if (asset == null) continue;
-                String name = asset.optString("name", "");
-                if (!name.endsWith(".apk")) continue;
-                apkUrl = asset.optString("browser_download_url", "");
-                break;
-            }
-        }
         if (versionCode <= 0) throw new Exception("Latest release is missing versionCode.");
-        if (apkUrl.trim().isEmpty()) throw new Exception("Latest release does not include an APK.");
-        return new UpdateInfo(versionCode, versionName, apkUrl);
+        String releaseUrl = release.optString("html_url", "");
+        if (!releaseUrl.startsWith("https://")) throw new Exception("Latest release is missing a secure release page.");
+        return new UpdateInfo(versionCode, versionName, releaseUrl);
     }
 
-    private File downloadUpdate(UpdateInfo update) throws Exception {
-        URL url = new URL(update.apkUrl);
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        connection.setRequestMethod("GET");
-        connection.setConnectTimeout(15000);
-        connection.setReadTimeout(120000);
-        connection.setRequestProperty("User-Agent", "Codex-Relay-Android/" + currentVersionName());
-
-        int status = connection.getResponseCode();
-        if (status < 200 || status >= 300) throw new Exception("Update download failed with " + status + ".");
-
-        File directory = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
-        if (directory == null && getFilesDir() != null) directory = getFilesDir();
-        if (directory == null) throw new Exception("Cannot prepare update download.");
-        if (!directory.exists() && !directory.mkdirs()) throw new Exception("Cannot create update folder.");
-
-        File apk = new File(directory, "codex-relay-" + update.versionCode + ".apk");
-        try (InputStream in = connection.getInputStream(); FileOutputStream out = new FileOutputStream(apk)) {
-            byte[] buffer = new byte[16 * 1024];
-            int read;
-            while ((read = in.read(buffer)) != -1) {
-                out.write(buffer, 0, read);
-            }
-        }
-        return apk;
-    }
-
-    private void openApkInstaller(File apk) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getPackageManager().canRequestPackageInstalls()) {
-            Toast.makeText(this, "Allow Codex Relay to install updates, then tap Check updates again.", Toast.LENGTH_LONG).show();
-            Intent settings = new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES);
-            settings.setData(Uri.parse("package:" + getPackageName()));
-            startActivity(settings);
-            return;
-        }
-
-        Uri apkUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", apk);
-        Intent install = new Intent(Intent.ACTION_VIEW);
-        install.setDataAndType(apkUri, "application/vnd.android.package-archive");
-        install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        install.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        startActivity(install);
+    private void openReleasePage(String releaseUrl) {
+        Intent browser = new Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl));
+        startActivity(browser);
     }
 
     private int currentVersionCode() throws Exception {
@@ -1229,12 +1219,12 @@ public class MainActivity extends Activity {
     private static final class UpdateInfo {
         final int versionCode;
         final String versionName;
-        final String apkUrl;
+        final String releaseUrl;
 
-        UpdateInfo(int versionCode, String versionName, String apkUrl) {
+        UpdateInfo(int versionCode, String versionName, String releaseUrl) {
             this.versionCode = versionCode;
             this.versionName = versionName;
-            this.apkUrl = apkUrl;
+            this.releaseUrl = releaseUrl;
         }
     }
 
@@ -1856,10 +1846,10 @@ public class MainActivity extends Activity {
     private void renderDemoProjects() {
         if (projectList == null) return;
         projectList.removeAllViews();
-        projectList.addView(projectRow("New project 5", "Git  /  Node  /  Agents", true, () -> selectProject("New project 5", "/Users/himanshu/Documents/New project 5")), matchWrap());
+        projectList.addView(projectRow("Mobile assistant", "Git  /  Node  /  Agents", true, () -> selectProject("Mobile assistant", "/Users/you/Documents/mobile-assistant")), matchWrap());
         LinearLayout.LayoutParams params = matchWrap();
         params.topMargin = dp(8);
-        projectList.addView(projectRow("Website experiments", "Node  /  Docs", false, () -> selectProject("Website experiments", "/Users/himanshu/Documents/Website experiments")), params);
+        projectList.addView(projectRow("Website experiments", "Node  /  Docs", false, () -> selectProject("Website experiments", "/Users/you/Documents/website-experiments")), params);
     }
 
     private View projectRow(String name, String detail, boolean selected, Runnable onClick) {
@@ -1973,10 +1963,32 @@ public class MainActivity extends Activity {
         resultTitle.setText("Copied");
     }
 
-    private boolean isValidHttpUrl(String value) {
+    private boolean isAllowedServerUrl(String value) {
+        if (value == null || value.trim().isEmpty()) return false;
         Uri uri = Uri.parse(value);
         String scheme = uri.getScheme();
-        return uri.getHost() != null && ("http".equals(scheme) || "https".equals(scheme));
+        String host = uri.getHost();
+        if (host == null) return false;
+        if ("https".equals(scheme)) return true;
+        return "http".equals(scheme) && isPrivateNetworkHost(host);
+    }
+
+    private boolean isPrivateNetworkHost(String host) {
+        String value = host == null ? "" : host.trim().toLowerCase();
+        if (value.equals("localhost") || value.equals("127.0.0.1") || value.equals("::1")) return true;
+        if (value.startsWith("10.") || value.startsWith("192.168.") || value.startsWith("169.254.")) return true;
+        if (value.startsWith("172.")) {
+            String[] parts = value.split("\\.");
+            if (parts.length >= 2) {
+                try {
+                    int second = Integer.parseInt(parts[1]);
+                    return second >= 16 && second <= 31;
+                } catch (NumberFormatException ignored) {
+                    return false;
+                }
+            }
+        }
+        return value.startsWith("fc") || value.startsWith("fd") || value.startsWith("fe80:");
     }
 
     private LinearLayout panel() {

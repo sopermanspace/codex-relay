@@ -2,17 +2,13 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - "android-native/**"
-      - ".github/workflows/android-apk.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  debug-apk:
-    name: Build native debug APK
+  release-apk:
+    name: Build native release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -30,28 +26,13 @@ jobs:
         with:
           gradle-version: "8.10.2"
 
-      - name: Build debug APK
+      - name: Build release APK
         working-directory: android-native
-        run: gradle assembleDebug
+        run: gradle assembleRelease
 
-      - name: Upload debug APK
+      - name: Upload unsigned release APK
         uses: actions/upload-artifact@v4
         with:
-          name: codex-remote-debug-apk
-          path: android-native/app/build/outputs/apk/debug/app-debug.apk
+          name: codex-relay-release-unsigned-apk
+          path: android-native/app/build/outputs/apk/release/app-release-unsigned.apk
           if-no-files-found: error
-
-      - name: Publish latest APK release
-        if: github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          VERSION_CODE="$(grep -m1 'versionCode' android-native/app/build.gradle | awk '{print $2}')"
-          VERSION_NAME="$(grep -m1 'versionName' android-native/app/build.gradle | sed -E 's/.*versionName "([^"]+)".*/\1/')"
-          NOTES="versionCode: ${VERSION_CODE}
-          versionName: ${VERSION_NAME}
-
-          Latest Codex Relay Android debug APK."
-          gh release view android-latest >/dev/null 2>&1 || gh release create android-latest --title "Codex Relay Android Latest" --notes "${NOTES}" --target "${GITHUB_SHA}"
-          gh release edit android-latest --title "Codex Relay Android Latest" --notes "${NOTES}" --latest
-          gh release upload android-latest android-native/app/build/outputs/apk/debug/app-debug.apk#codex-relay-debug.apk --clobber
