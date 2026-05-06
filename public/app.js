@@ -55,6 +55,8 @@ let activeAssistantMessage = null;
 let pendingAttachments = [];
 let visiblePairingRequest = null;
 let connectedDevice = null;
+let activeThreadId = '';
+let activeThreadTitle = '';
 
 function setPairingFocus(isFocused) {
   shell?.classList.toggle('is-pairing', isFocused);
@@ -193,6 +195,8 @@ interruptButton.addEventListener('click', () => {
 });
 
 clearButton.addEventListener('click', () => {
+  activeThreadId = '';
+  activeThreadTitle = '';
   chatLog.replaceChildren(emptyState);
   emptyState.classList.remove('hidden');
   clearAttachments();
@@ -392,7 +396,8 @@ async function sendPrompt(prompt, attachments = []) {
       },
       body: JSON.stringify({
         prompt: buildPrompt(prompt, attachments),
-        ...(selectedProject.path ? { cwd: selectedProject.path } : {})
+        ...(selectedProject.path ? { cwd: selectedProject.path } : {}),
+        ...(activeThreadId ? { threadId: activeThreadId } : {})
       }),
       signal: controller.signal
     });
@@ -403,6 +408,10 @@ async function sendPrompt(prompt, attachments = []) {
     }
 
     const output = payload.output || 'Done.';
+    if (payload.threadId) {
+      activeThreadId = payload.threadId;
+      activeThreadTitle = payload.threadTitle || activeThreadTitle;
+    }
     updateAssistantMessage(activeAssistantMessage, output, {
       error: payload.ok === false,
       durationMs: payload.durationMs
@@ -906,6 +915,8 @@ function reconcileSelectedProject() {
 }
 
 function selectProject(project) {
+  activeThreadId = '';
+  activeThreadTitle = '';
   selectedProject = {
     name: project.name || 'Default workspace',
     path: project.path || ''
