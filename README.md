@@ -1,5 +1,7 @@
 # Codex Relay
 
+> **Project status:** This project is no longer needed. ChatGPT added mobile support. :party:
+
 Codex Relay is a local command bridge for controlling Codex from a paired Android phone. It includes a Node.js app-server, a polished local web pairing screen, and a native Android client.
 
 > Security note: this project can start Codex and send commands on your Mac. Keep the server on localhost by default, pair only on trusted Wi-Fi, and use HTTPS for any remote access.
@@ -18,6 +20,7 @@ Codex Relay is a local command bridge for controlling Codex from a paired Androi
 - Native Android app, not a WebView shell.
 - Paired-device token auth for future reconnects.
 - Project picker, slash commands, file mentions, image attachment upload, and Codex result rendering.
+- Browser live terminal for interactive Codex controls such as model switching, approvals, MCP inspection, compacting, and raw slash commands.
 - Safe open-source defaults: localhost server binding, ignored `.env`, HTTPS-required remote mode, and no auto-installed APK updates.
 
 ## Requirements
@@ -48,6 +51,8 @@ Codex Relay is a local command bridge for controlling Codex from a paired Androi
    ```
 
    Open `http://localhost:8787`.
+
+   The browser app includes both the chat surface and a live Codex terminal. Use the terminal button after pairing to access the full interactive Codex CLI from the selected project.
 
 4. To pair an Android phone on trusted Wi-Fi, edit `.env` and set:
 
@@ -104,7 +109,7 @@ Copy `.env.example` or run `npm run setup`.
 | `REMOTE_TOKEN` | generated | Private legacy token. Device tokens are preferred. |
 | `PORT` | `8787` | App-server port. |
 | `HOST` | `127.0.0.1` | Bind address. Use `0.0.0.0` only for trusted Wi-Fi pairing. |
-| `CODEX_COMMAND` | `codex` | Command used to start Codex. |
+| `CODEX_COMMAND` | `/Applications/Codex.app/Contents/Resources/codex` on macOS when installed, otherwise `codex` | Codex app bundle command used for desktop-app-native sync. |
 | `CODEX_WORKDIR` | current folder | Default workspace. |
 | `CODEX_PROJECT_ROOTS` | parent folder | Folders exposed in the project picker. |
 | `TRUST_PROXY` | `false` | Trust `X-Forwarded-Proto` only behind your HTTPS proxy. |
